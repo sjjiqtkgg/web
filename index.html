@@ -87,8 +87,8 @@
 
 <script>
     // ======================= 配置区域 =======================
-    // 请修改为您的 FastAPI 后端地址（例如 http://127.0.0.1:8000 或 https://your-domain.com）
-    const API_BASE = 'https://live1-8fwn.onrender.com';   // ⚠️ 重要：改为您自己的后端地址
+    // ⚠️ 请修改为您的 FastAPI 后端地址（例如 http://127.0.0.1:8000 或 https://your-domain.com）
+    const API_BASE = 'https://live1-8fwn.onrender.com';   // 临时地址，请替换为您自己的后端
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -127,7 +127,7 @@
       return b2h(core(s2b(u),u.length*8));
     }
 
-    // ========== 斗鱼：前端签名 + 获取所有 CDN（不过滤 hw/ws） ==========
+    // ========== 斗鱼：前端签名 + 强制锁定华为 CDN（修复卡顿核心） ==========
     async function douyuSignAndPlay(roomId, crptext) {
         try {
             const did = 'a1f0b03c19b8e6b65f35d98404061501';
@@ -148,44 +148,38 @@
 
             // 优先 HLS
             if (d0.data.hls_url && d0.data.hls_url.startsWith('http')) {
-                return { streams: [{ cdn: '斗鱼-HLS', url: d0.data.hls_url, type: 'm3u8' }] };
+                // HLS 也强制替换域名和参数（如果有 douyucdn2.cn）
+                let url = d0.data.hls_url;
+                url = url.replace(/[^/]+\.douyucdn2\.cn/, 'hwa.douyucdn2.cn');
+                url = url.replace(/fcdn=[^&]+/, 'fcdn=hw');
+                return { streams: [{ cdn: '斗鱼-HLS', url: url, type: 'm3u8' }] };
             }
 
-            // 获取所有 CDN（不再过滤，保留 hw, ws, tct, ali 等）
-            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(Boolean);
-            if (!cdns.length) cdns = ['tct-h5', 'ali-h5', 'hw-h5'];
-
-            // 排序：华为优先（因为用户实测 hw 不卡），然后腾讯，然后阿里，其余随意
-            cdns.sort((a, b) => {
-                const isHw = c => c.toLowerCase().includes('hw');
-                const isTx = c => c.toLowerCase().includes('tct') || c.toLowerCase().includes('tx');
-                const isAli = c => c.toLowerCase().includes('ali');
-                if (isHw(a) && !isHw(b)) return -1;
-                if (!isHw(a) && isHw(b)) return 1;
-                if (isTx(a) && !isTx(b)) return -1;
-                if (!isTx(a) && isTx(b)) return 1;
-                if (isAli(a) && !isAli(b)) return -1;
-                if (!isAli(a) && isAli(b)) return 1;
-                return 0;
-            });
+            // 只保留华为 CDN（hw），避免 token 错乱
+            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(c => c && c.toLowerCase().includes('hw'));
+            if (!cdns.length) cdns = ['hw-h5']; // 强制使用华为
 
             const streams = [];
-            await Promise.all(cdns.slice(0, 4).map(async cdn => {
+            for (const cdn of cdns.slice(0, 2)) {
                 try {
                     const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=0` });
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
                         let url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
-                        // 不再做任何域名替换，保留原始 CDN
+                        // 🔥 关键修复：强制替换为华为边缘节点并修正 fcdn 参数
+                        url = url.replace(/[^/]+\.douyucdn2\.cn/, 'hwa.douyucdn2.cn');
+                        url = url.replace(/fcdn=[^&]+/, 'fcdn=hw');
                         streams.push({ cdn: cdn, url: url, type: 'flv' });
                     }
                 } catch(e) {}
-            }));
+            }
 
             if (!streams.length) {
-                // 降级：使用原始返回的第一个流
+                // 极端降级：使用原始返回的第一个流，但依然强制修正
                 let fallbackUrl = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
-                streams.push({ cdn: 'default', url: fallbackUrl, type: 'flv' });
+                fallbackUrl = fallbackUrl.replace(/[^/]+\.douyucdn2\.cn/, 'hwa.douyucdn2.cn');
+                fallbackUrl = fallbackUrl.replace(/fcdn=[^&]+/, 'fcdn=hw');
+                streams.push({ cdn: 'hw', url: fallbackUrl, type: 'flv' });
             }
             return { streams };
         } catch(e) {
@@ -757,10 +751,10 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: true,          // 关闭缓冲池，减少延迟
+                        enableStashBuffer: true,         
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 6.0,  // 提高容忍度（斗鱼时间戳跳跃大）
+                        liveBufferLatencyMaxLatency: 6.0,  
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
