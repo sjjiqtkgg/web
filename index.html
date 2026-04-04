@@ -749,16 +749,18 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: false,
-                        stashInitialSize: 64,
+                        enableStashBuffer: true,
+                        stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 5.0,
-                        liveBufferLatencyMinRemain: 0.5,
+                        liveBufferLatencyMaxLatency: 7.0,
+                        liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 10,
                         autoCleanupMinBackwardDuration: 5,
                         reconnectInterval: 5,
                         reconnectAttempts: 3
+                        fixAudioTimestampGap: false       // 禁止修复音频时间戳（斗鱼常错）
+                    }
                     });
                     player.attachMediaElement(video);
                     player.load();
