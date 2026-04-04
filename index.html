@@ -31,7 +31,7 @@
         .switch-icon:hover { background: #2a2a2a; }
         .chat-content { flex: 1; overflow-y: auto; padding: 8px; }
         .chat-messages { display: flex; flex-direction: column; gap: 6px; }
-        .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
+        .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 14px; }
         .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
         .chat-text { color: #ddd; word-break: break-word; }
@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-8fwn.onrender.com';  // 后端地址
+    const API_BASE = window.location.origin;  // 与 Worker 同源，无需跨域
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -126,7 +126,7 @@
       return b2h(core(s2b(u),u.length*8));
     }
 
-    // ========== 斗鱼：前端签名 + 多 CDN 并发拉流 ==========
+    // ========== 斗鱼：前端签名 + 只保留腾讯/阿里 CDN（移除 ws/hw） ==========
     async function douyuSignAndPlay(roomId, crptext) {
         try {
             const did = 'a1f0b03c19b8e6b65f35d98404061501';
@@ -145,45 +145,58 @@
             const d0 = await r0.json();
             if (d0.error !== 0) throw new Error('斗鱼拉流: ' + (d0.msg || d0.error));
 
-            const multirates = d0.data.multirates || [];
-            let bestRate = 0;
-            if (multirates.length) {
-                const hasOri = multirates.some(x => x.rate === 0);
-                if (!hasOri) { multirates.sort((a,b) => b.rate - a.rate); bestRate = multirates[0].rate; }
+            // 优先 HLS
+            if (d0.data.hls_url && d0.data.hls_url.startsWith('http')) {
+                return { streams: [{ cdn: '斗鱼-HLS', url: d0.data.hls_url, type: 'm3u8' }] };
             }
 
-            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(x => x && !x.startsWith('scdn'));
-            cdns.sort((a,b) => {
-                const tx = c => c.toLowerCase().includes('tx');
-                const ali = c => c.toLowerCase().includes('ali');
-                if (tx(a)&&!tx(b)) return -1; if (!tx(a)&&tx(b)) return 1;
-                if (ali(a)&&!ali(b)) return -1; if (!ali(a)&&ali(b)) return 1;
+            // 获取 CDN 列表，只保留腾讯(tct/tx)和阿里(ali)
+            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(cdn => {
+                if (!cdn) return false;
+                const c = cdn.toLowerCase();
+                return c.includes('tct') || c.includes('tx') || c.includes('ali');
+            });
+            if (!cdns.length) cdns = ['tct-h5', 'ali-h5'];
+
+            // 排序：腾讯优先，阿里次之
+            cdns.sort((a, b) => {
+                const isTx = c => c.toLowerCase().includes('tct') || c.toLowerCase().includes('tx');
+                const isAli = c => c.toLowerCase().includes('ali');
+                if (isTx(a) && !isTx(b)) return -1;
+                if (!isTx(a) && isTx(b)) return 1;
+                if (isAli(a) && !isAli(b)) return -1;
+                if (!isAli(a) && isAli(b)) return 1;
                 return 0;
             });
-            if (!cdns.length) cdns = [''];
 
             const streams = [];
-            await Promise.all(cdns.slice(0,4).map(async cdn => {
+            await Promise.all(cdns.slice(0, 3).map(async cdn => {
                 try {
-                    const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=${bestRate}` });
+                    const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=0` });
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
-                        const url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
-                        streams.push({ cdn: cdn || '默认', url: ensureHttps(url), type: 'flv' });
+                        let url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
+                        // 强制替换 ws/hw 为腾讯/阿里（二次保险）
+                        url = url.replace(/ws-h5\.douyucdn\.cn/g, 'tct-h5.douyucdn.cn');
+                        url = url.replace(/hw-h5\.douyucdn\.cn/g, 'ali-h5.douyucdn.cn');
+                        streams.push({ cdn: cdn, url: url, type: 'flv' });
                     }
-                } catch(_) {}
+                } catch(e) {}
             }));
 
             if (!streams.length) {
-                const url = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
-                streams.push({ cdn: '斗鱼', url: ensureHttps(url), type: 'flv' });
+                let fallbackUrl = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
+                fallbackUrl = fallbackUrl.replace(/ws-h5\.douyucdn\.cn/g, 'tct-h5.douyucdn.cn');
+                fallbackUrl = fallbackUrl.replace(/hw-h5\.douyucdn\.cn/g, 'ali-h5.douyucdn.cn');
+                streams.push({ cdn: 'tct', url: fallbackUrl, type: 'flv' });
             }
             return { streams };
         } catch(e) {
-            logStatus('❌ ' + e.message);
+            logStatus('❌ 斗鱼签名失败: ' + e.message);
             return null;
         }
     }
+
     // =======================================================
 
     let art = null;
@@ -195,8 +208,8 @@
     let currentAvatar = '';
     let danmakuEnabled = true;
     let currentTab = 'danmaku';
-    let dmWs = null;          // 弹幕 WebSocket
-    let dmConfig = null;      // 弹幕配置（虎牙）
+    let dmWs = null;
+    let dmConfig = null;
     let currentChatList = [];
     const CHAT_MAX = 300;
     let chatMessagesDiv = null;
@@ -205,7 +218,6 @@
     let sortable = null;
     const HISTORY_MAX = 30;
 
-    // 存储函数
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
@@ -239,7 +251,6 @@
         return '未知';
     }
 
-    // 历史记录
     function addToHistory(url, name, platform, avatar) {
         if (!url) return;
         let history = _loadHistory().filter(item => item.url !== url);
@@ -274,7 +285,6 @@
 
     function playFromHistory(url) { document.getElementById('url').value = url; window.go(); }
 
-    // 关注功能
     function updateFollowBtn(url) {
         const btn = document.getElementById('btn-fav');
         if (!btn) return;
@@ -351,7 +361,7 @@
         renderFollowList();
     }
 
-    // ==================== 斗鱼弹幕（WebSocket） ====================
+    // ==================== 斗鱼弹幕 ====================
     function startDouyuDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
         if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
@@ -402,7 +412,7 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startDouyuDanmaku(roomId), 3000); };
     }
 
-    // ==================== 虎牙弹幕（Tars 协议） ====================
+    // ==================== 虎牙弹幕（Tars） ====================
     function tarsReader(ab) {
         const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab);
         let pos = 0;
@@ -654,7 +664,6 @@
         if (chatContent) chatContent.scrollTop = chatContent.scrollHeight;
     }
 
-    // 强制 HTTPS（不经过代理）
     function ensureHttps(url) {
         if (!url) return url;
         if (url.startsWith('https://')) return url;
@@ -678,16 +687,20 @@
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
                 if (data.client) {
-                    // 斗鱼：前端签名模式
-                    logStatus('签名中…');
-                    const cd = await douyuSignAndPlay(data.roomId, data.crptext);
-                    if (!cd || !cd.streams || !cd.streams.length) throw new Error('斗鱼签名失败');
-                    streams = cd.streams;
-                    currentAnchorName = data.anchorName || '斗鱼主播';
-                    currentAvatar = data.avatar || '';
-                    dmConfig = null;
+                    // 斗鱼单独处理（前端签名 + CDN过滤）
+                    if (raw.includes('douyu.com')) {
+                        const cd = await douyuSignAndPlay(data.roomId, data.crptext);
+                        if (!cd) throw new Error('斗鱼签名失败');
+                        streams = cd.streams;
+                        currentAnchorName = data.anchorName || data.roomName || '斗鱼主播';
+                        currentAvatar = data.avatar || '';
+                        currentPlatform = '斗鱼';
+                    } else {
+                        // B站/抖音等其他平台（保持原有后端解析，但需要前端实现 clientParse）
+                        // 由于 Worker 中已移除 B站抖音弹幕，这里简单报错
+                        throw new Error('当前 Worker 不支持 B站/抖音解析，请使用直链或更换后端');
+                    }
                 } else if (data.streams && data.streams.length) {
-                    // 所有流地址强制 HTTPS（不代理）
                     streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
@@ -749,30 +762,44 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: true,
+                        enableStashBuffer: false,          // 关闭缓冲池，减少延迟
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 7.0,
+                        liveBufferLatencyMaxLatency: 7.0,   // 提高容忍度（斗鱼时间戳跳跃大）
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
-                        autoCleanupMaxBackwardDuration: 10,
-                        autoCleanupMinBackwardDuration: 5,
+                        autoCleanupMaxBackwardDuration: 14,
+                        autoCleanupMinBackwardDuration: 6,
                         reconnectInterval: 5,
-                        reconnectAttempts: 3
+                        reconnectAttempts: 3,
+                        fixAudioTimestampGap: false
                     });
                     player.attachMediaElement(video);
                     player.load();
                     video._mpegts = player;
+
+                    // 超时检测：12秒未播放则重新加载
+                    let playingFlag = false;
+                    const onPlaying = () => { playingFlag = true; clearTimeout(playStartTimer); };
+                    video.addEventListener('playing', onPlaying);
+                    const playStartTimer = setTimeout(() => {
+                        if (!playingFlag && art && lastRoomUrl) {
+                            console.warn('[flv] 12秒未开始播放，尝试切换 CDN 或重新加载');
+                            const currentQuality = art.quality;
+                            const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
+                            if (nextQuality) art.switchQuality(nextQuality);
+                            else goWithUrl(lastRoomUrl);
+                        }
+                        video.removeEventListener('playing', onPlaying);
+                    }, 12000);
+
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
-                            console.warn('[flv] 致命错误，5秒后重新解析', err);
-                            const currentUrl = art.url;
-                            const nextQuality = (art.option.quality || []).find(q => q.url !== currentUrl);
-                            if (nextQuality) {
-                                art.switchQuality(nextQuality, true);
-                            } else {
-                                setTimeout(() => goWithUrl(lastRoomUrl), 5000);
-                            }
+                            console.warn('[flv] 致命错误，尝试切换画质或重新加载', err);
+                            const currentQuality = art.quality;
+                            const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
+                            if (nextQuality) art.switchQuality(nextQuality);
+                            else goWithUrl(lastRoomUrl);
                         }
                     });
                 },
@@ -810,7 +837,6 @@
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
-            // 启动弹幕
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
             if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                 const roomId = lastRoomUrl.split('/').pop().split('?')[0];
@@ -838,7 +864,6 @@
         if (btn) { btn.disabled = loading; btn.textContent = loading ? '…' : '播放'; }
     }
 
-    // UI 标签页
     function initTabs() {
         const btns = document.querySelectorAll('.bar-tab');
         const headerTitle = document.getElementById('header-title');
