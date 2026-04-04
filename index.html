@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+    <title>聚合直播 - 全平台版</title>
+    <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        #bar { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 48px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+        #url { flex: 1; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 8px 12px; color: #eee; font-size: 14px; outline: none; }
+        #url:focus { border-color: #f5a623; }
+        button { background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 6px 14px; color: #ddd; font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        button:hover { background: #3a3a3a; border-color: #f5a623; color: #f5a623; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .fav-on { color: #f5a623 !important; border-color: #f5a623 !important; }
+        .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
+        .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
+        #main { flex: 1; display: flex; min-height: 0; }
+        #player-container { flex: 1; background: #000; position: relative; }
+        #player { width: 100%; height: 100%; }
+        #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
+        .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
+        .chat-header span { color: #f5a623; font-weight: 500; }
+        .danmaku-switch { display: flex; align-items: center; gap: 8px; }
+        .switch-icon { font-size: 18px; cursor: pointer; padding: 4px; border-radius: 4px; }
+        .switch-icon:hover { background: #2a2a2a; }
+        .chat-content { flex: 1; overflow-y: auto; padding: 8px; }
+        .chat-messages { display: flex; flex-direction: column; gap: 6px; }
+        .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 14px; }
+        .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
+        .chat-text { color: #ddd; word-break: break-word; }
+        .empty-chat { text-align: center; color: #555; padding: 20px; font-style: italic; }
+        .follow-list, .history-list { display: flex; flex-direction: column; gap: 6px; }
+        .follow-item, .history-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; background: #141414; transition: background 0.2s; }
+        .follow-item:hover, .history-item:hover { background: #222; }
+        .follow-avatar, .history-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2a2a2a; object-fit: cover; flex-shrink: 0; }
+        .follow-info, .history-info { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .follow-status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: #222; }
+        .follow-status.online { color: #8bc34a; }
+        .follow-status.offline { color: #f44336; }
+        .follow-delete { color: #666; padding: 0 4px; font-size: 16px; }
+        .follow-delete:hover { color: #f44336; }
+        .history-time { font-size: 10px; color: #888; }
+        @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
+    </style>
+</head>
+<body>
+<div id="bar">
+    <input id="url" type="text" placeholder="虎牙/斗鱼/B站/抖音 直播间地址，或 .flv/.m3u8 直链" spellcheck="false">
+    <button id="btn-play" onclick="window.go()">播放</button>
+    <button id="btn-fav" onclick="window.toggleFollow()" title="关注">★</button>
+    <button onclick="window.openOriginalUrl()" title="原网页">🔗</button>
+    <button class="bar-tab active" data-tab="danmaku">📢 弹幕</button>
+    <button class="bar-tab" data-tab="follow">★ 关注</button>
+    <button class="bar-tab" data-tab="history">🕒 历史</button>
+</div>
+<div id="main">
+    <div id="player-container">
+        <div id="player"></div>
+    </div>
+    <div id="chat-panel">
+        <div class="chat-header">
+            <span id="header-title">弹幕列表</span>
+            <div class="danmaku-switch" id="danmaku-switch">
+                <span class="switch-icon" id="dm-switch-icon" title="弹幕开关">🔊</span>
+            </div>
+            <button id="header-action" style="display:none;">刷新</button>
+        </div>
+        <div class="chat-content" id="chat-content">
+            <div class="chat-messages" id="chat-messages">
+                <div class="empty-chat">✨ 连接弹幕后消息显示在此处</div>
+            </div>
+            <div class="follow-list" id="follow-list" style="display:none;"></div>
+            <div class="history-list" id="history-list" style="display:none;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://registry.npmmirror.com/mpegts.js/1/files/dist/mpegts.js"></script>
+<script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
+
+<script>
+    // ======================= 配置区域 =======================
+    const API_BASE = 'https://live1-8fwn.onrender.com';  // 请修改为实际后端地址
+    // =======================================================
+
+    let art = null;
+    let lastRoomUrl = '';
+    let savedVolume = 0.5;
+    let savedMuted = false;
+    let currentAnchorName = '';
+    let currentPlatform = '';
+    let currentAvatar = '';
+    let danmakuEnabled = true;
+    let currentTab = 'danmaku';
+    let dmWs = null;          // 弹幕 WebSocket
+    let dmConfig = null;      // 弹幕配置（虎牙）
+    let currentChatList = [];
+    const CHAT_MAX = 300;
+    let chatMessagesDiv = null;
+    let followListDiv = null;
+    let historyListDiv = null;
+    let sortable = null;
+    const HISTORY_MAX = 30;
+
+    // 存储函数
+    function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
+    function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
+    function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
+    function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
+
+    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
+    function logStatus(msg) { console.log('[状态]', msg); }
+
+    function loadVolumeMemory() {
+        let vol = localStorage.getItem('ps_volume');
+        if (vol !== null) { let v = parseFloat(vol); if (!isNaN(v) && v>=0 && v<=1) savedVolume = v; }
+        let mut = localStorage.getItem('ps_muted');
+        if (mut !== null) savedMuted = mut === 'true';
+    }
+    function saveVolumeMemory() { localStorage.setItem('ps_volume', savedVolume); localStorage.setItem('ps_muted', savedMuted); }
+
+    function updatePageTitle(anchorName, platform) {
+        const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
+        const hasRealName = anchorName && !defaultNames.includes(anchorName) && !anchorName.includes('直链');
+        if (hasRealName && platform && platform !== '未知') document.title = platform + ' ' + anchorName;
+        else if (platform && platform !== '未知') document.title = platform;
+        else if (anchorName && !defaultNames.includes(anchorName)) document.title = anchorName;
+        else document.title = '聚合直播';
+    }
+
+    function getPlatformName(url) {
+        if (url.includes('huya.com')) return '虎牙';
+        if (url.includes('douyu.com')) return '斗鱼';
+        if (url.includes('bilibili.com')) return 'B站';
+        if (url.includes('douyin.com')) return '抖音';
+        return '未知';
+    }
+
+    // 历史记录
+    function addToHistory(url, name, platform, avatar) {
+        if (!url) return;
+        let history = _loadHistory().filter(item => item.url !== url);
+        history.unshift({ url, name: name || url.split('/').pop().split('?')[0] || '未知', platform: platform || getPlatformName(url), avatar: avatar || '', time: Date.now() });
+        if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
+        _saveHistory(history);
+        renderHistoryList();
+    }
+
+    function renderHistoryList() {
+        if (!historyListDiv) return;
+        const items = _loadHistory();
+        if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
+        let html = '';
+        items.forEach(item => {
+            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${escapeHtml(item.avatar)}" alt="">` : '<div class="history-avatar"></div>';
+            html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
+        });
+        historyListDiv.innerHTML = html;
+        historyListDiv.querySelectorAll('.history-item').forEach(el => {
+            el.addEventListener('click', () => { playFromHistory(el.dataset.url); });
+        });
+    }
+
+    function formatTime(timestamp) {
+        const diff = Date.now() - timestamp;
+        if (diff < 60000) return '刚刚';
+        if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
+        if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
+        return new Date(timestamp).toLocaleDateString();
+    }
+
+    function playFromHistory(url) { document.getElementById('url').value = url; window.go(); }
+
+    // 关注功能
+    function updateFollowBtn(url) {
+        const btn = document.getElementById('btn-fav');
+        if (!btn) return;
+        const isFollow = _loadFollows().some(x => x.url === url);
+        btn.classList.toggle('fav-on', isFollow);
+        btn.title = isFollow ? '取消关注' : '关注';
+    }
+
+    function renderFollowList() {
+        if (!followListDiv) return;
+        const items = _loadFollows();
+        if (!items.length) {
+            followListDiv.innerHTML = '<div class="empty-chat">暂无关注</div>';
+            if (sortable) sortable.destroy();
+            sortable = null;
+            return;
+        }
+        let html = '';
+        items.forEach((x, i) => {
+            const statusText = x.status === 'online' ? '直播中' : '未开播';
+            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${escapeHtml(x.avatar)}" alt="">` : '<div class="follow-avatar"></div>';
+            html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
+        });
+        followListDiv.innerHTML = html;
+        if (sortable) sortable.destroy();
+        sortable = new Sortable(followListDiv, { animation: 150, onEnd: () => {
+            const newItems = [];
+            followListDiv.querySelectorAll('.follow-item').forEach(el => newItems.push(items[parseInt(el.dataset.id)]));
+            _saveFollows(newItems);
+            renderFollowList();
+        } });
+        followListDiv.onclick = (e) => {
+            const del = e.target.closest('[data-del]');
+            if (del) {
+                const idx = parseInt(del.dataset.del);
+                const arr = _loadFollows();
+                arr.splice(idx, 1);
+                _saveFollows(arr);
+                renderFollowList();
+                updateFollowBtn(lastRoomUrl);
+                return;
+            }
+            const item = e.target.closest('.follow-item');
+            if (item && item.dataset.url) playFromFollows(item.dataset.url);
+        };
+        followListDiv.querySelectorAll('.follow-item').forEach(el => {
+            el.addEventListener('auxclick', (e) => {
+                if (e.button === 1 && el.dataset.url) {
+                    e.preventDefault();
+                    window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(el.dataset.url), '_blank');
+                }
+            });
+        });
+    }
+
+    function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
+
+    async function refreshAllFollowStatus() {
+        const items = _loadFollows();
+        if (!items.length) return;
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            try {
+                const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}`);
+                const d = await r.json();
+                if (d.error) item.status = 'error';
+                else if (d.streams && d.streams.length) item.status = 'online';
+                else item.status = 'offline';
+                if (d.avatar && !item.avatar) item.avatar = d.avatar;
+            } catch(e) { item.status = 'error'; }
+            await new Promise(r => setTimeout(r, 500));
+        }
+        _saveFollows(items);
+        renderFollowList();
+    }
+
+    // ==================== 斗鱼弹幕（WebSocket） ====================
+    function startDouyuDanmaku(roomId) {
+        if (!danmakuEnabled || !roomId) return;
+        if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+        function enc(payload) {
+            const body = new TextEncoder().encode(payload);
+            const PackLen = body.length + 9;
+            const buf = new ArrayBuffer(body.length + 13);
+            const v = new DataView(buf);
+            v.setUint32(0, PackLen, true); v.setUint32(4, PackLen, true);
+            v.setUint16(8, 689, true); v.setUint8(10, 0); v.setUint8(11, 0);
+            new Uint8Array(buf, 12).set(body);
+            v.setUint8(12 + body.length, 0);
+            return buf;
+        }
+        function parseSTT(s) {
+            const r = {};
+            s.split('/').forEach(p => {
+                const i = p.indexOf('@=');
+                if (i >= 0) r[p.slice(0,i)] = p.slice(i+2).replace(/@S/g,'/').replace(/@A/g,'@');
+            });
+            return r;
+        }
+        const ws = new WebSocket('wss://danmuproxy.douyu.com:8506/');
+        ws.binaryType = 'arraybuffer';
+        dmWs = ws;
+        ws.onopen = () => {
+            ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
+            ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
+            setInterval(() => { if (ws.readyState === 1) ws.send(enc('type@=mrkl/')); }, 45000);
+        };
+        ws.onmessage = (e) => {
+            const data = new Uint8Array(e.data);
+            let offset = 0;
+            while (offset + 13 <= data.length) {
+                const v = new DataView(data.buffer, data.byteOffset + offset);
+                const packLen = v.getUint32(0, true);
+                if (packLen < 9 || offset + 4 + packLen > data.length) break;
+                const body = new TextDecoder('utf-8', {fatal:false}).decode(data.slice(offset+12, offset+4+packLen-1));
+                const msg = parseSTT(body);
+                if (msg.type === 'chatmsg' && msg.txt) {
+                    const nick = msg.nn || '匿名用户';
+                    const txt = msg.txt.replace(/@S/g, '/').replace(/@A/g, '@');
+                    addChatMessage(nick, txt);
+                }
+                offset += 4 + packLen;
+            }
+        };
+        ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startDouyuDanmaku(roomId), 3000); };
+    }
+
+    // ==================== 虎牙弹幕（Tars 协议） ====================
+    function tarsReader(ab) {
+        const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab);
+        let pos = 0;
+        function readHead() {
+            if (pos >= buf.length) return null;
+            let b = buf[pos++];
+            let tag = (b >> 4) & 0xF;
+            let type = b & 0xF;
+            if (tag === 15) {
+                if (pos >= buf.length) return null;
+                tag = buf[pos++];
+            }
+            return { tag, type };
+        }
+        function readRawInt() {
+            const h = readHead();
+            if (!h) return 0;
+            switch (h.type) {
+                case 12: return 0;
+                case 0: return buf[pos++];
+                case 1: return (buf[pos++] << 8) | buf[pos++];
+                case 2: return (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
+                case 3: {
+                    const hi = (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
+                    const lo = (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
+                    return hi * 4294967296 + (lo >>> 0);
+                }
+                default: return 0;
+            }
+        }
+        function skipField(type) {
+            switch (type) {
+                case 0: pos++; break;
+                case 1: pos += 2; break;
+                case 2: pos += 4; break;
+                case 3: pos += 8; break;
+                case 4: pos += 4; break;
+                case 5: pos += 8; break;
+                case 6: pos += buf[pos] + 1; break;
+                case 7: {
+                    const len = (buf[pos] << 24) | (buf[pos+1] << 16) | (buf[pos+2] << 8) | buf[pos+3];
+                    pos += 4 + len;
+                    break;
+                }
+                case 8: {
+                    const n = readRawInt();
+                    for (let i = 0; i < 2 * n; i++) {
+                        const h = readHead();
+                        if (h) skipField(h.type);
+                    }
+                    break;
+                }
+                case 9: {
+                    const n = readRawInt();
+                    for (let i = 0; i < n; i++) {
+                        const h = readHead();
+                        if (h) skipField(h.type);
+                    }
+                    break;
+                }
+                case 10: skipToStructEnd(); break;
+                case 11: break;
+                case 12: break;
+                case 13: readHead(); const l = readRawInt(); pos += l; break;
+            }
+        }
+        function skipToStructEnd() {
+            while (pos < buf.length) {
+                const h = readHead();
+                if (!h) break;
+                if (h.type === 11) return;
+                skipField(h.type);
+            }
+        }
+        function skipToTag(targetTag) {
+            while (pos < buf.length) {
+                const saved = pos;
+                const h = readHead();
+                if (!h) return null;
+                if (h.tag === targetTag) return h;
+                if (h.tag > targetTag || h.type === 11) {
+                    pos = saved;
+                    return null;
+                }
+                skipField(h.type);
+            }
+            return null;
+        }
+        function readInt(tag) {
+            const h = skipToTag(tag);
+            if (!h) return 0;
+            switch (h.type) {
+                case 12: return 0;
+                case 0: return buf[pos++];
+                case 1: return (buf[pos++] << 8) | buf[pos++];
+                case 2: return (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
+                default: skipField(h.type); return 0;
+            }
+        }
+        function readBytes(tag) {
+            const h = skipToTag(tag);
+            if (!h) return null;
+            if (h.type !== 13) { skipField(h.type); return null; }
+            readHead();
+            const n = readRawInt();
+            const bytes = buf.slice(pos, pos + n);
+            pos += n;
+            return bytes;
+        }
+        function readString(tag) {
+            const h = skipToTag(tag);
+            if (!h) return '';
+            let len;
+            if (h.type === 6) {
+                len = buf[pos++];
+            } else if (h.type === 7) {
+                len = (buf[pos] << 24) | (buf[pos+1] << 16) | (buf[pos+2] << 8) | buf[pos+3];
+                pos += 4;
+            } else {
+                skipField(h.type);
+                return '';
+            }
+            const s = new TextDecoder().decode(buf.slice(pos, pos + len));
+            pos += len;
+            return s;
+        }
+        function readStructBegin(tag) {
+            const h = skipToTag(tag);
+            return h && h.type === 10;
+        }
+        return { readInt, readBytes, readString, readStructBegin, skipToStructEnd };
+    }
+
+    function parseHuyaMsg(data) {
+        const r = tarsReader(data.buffer || data);
+        if (r.readInt(0) !== 7) return;
+        const vData = r.readBytes(1);
+        if (!vData || !vData.length) return;
+        const r2 = tarsReader(vData);
+        r2.readInt(0);
+        if (r2.readInt(1) !== 1400) return;
+        const sMsg = r2.readBytes(2);
+        let nick = r2.readString(4) || '虎牙网友';
+        if (!sMsg || !sMsg.length) return;
+        const r3 = tarsReader(sMsg);
+        if (nick === '虎牙网友' && r3.readStructBegin(0)) {
+            r3.readInt(0);
+            r3.readInt(1);
+            const innerNick = r3.readString(2);
+            if (innerNick) nick = innerNick;
+            r3.skipToStructEnd();
+        }
+        const sContent = r3.readString(3);
+        if (sContent) addChatMessage(nick, sContent);
+    }
+
+    function startHuyaDanmaku(config) {
+        if (!config || !config.ayyuid) return;
+        const { ayyuid, topSid, subSid } = config;
+        function tarsOut() {
+            const bytes = [];
+            function wHead(tag, type) {
+                if (tag < 15) bytes.push((tag << 4) | type);
+                else { bytes.push(0xF0 | type); bytes.push(tag); }
+            }
+            function wInt8(tag, v) {
+                if (v === 0) wHead(tag, 12);
+                else { wHead(tag, 0); bytes.push(v & 0xFF); }
+            }
+            function wInt16(tag, v) {
+                if (v >= -128 && v <= 127) wInt8(tag, v);
+                else { wHead(tag, 1); bytes.push((v >> 8) & 0xFF, v & 0xFF); }
+            }
+            function wInt32(tag, v) {
+                if (v >= -32768 && v <= 32767) wInt16(tag, v);
+                else { wHead(tag, 2); bytes.push((v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF); }
+            }
+            function wInt64(tag, v) {
+                if (v >= -2147483648 && v <= 2147483647) wInt32(tag, v);
+                else {
+                    wHead(tag, 3);
+                    const hi = Math.floor(v / 0x100000000);
+                    const lo = v >>> 0;
+                    bytes.push((hi >> 24) & 0xFF, (hi >> 16) & 0xFF, (hi >> 8) & 0xFF, hi & 0xFF,
+                               (lo >> 24) & 0xFF, (lo >> 16) & 0xFF, (lo >> 8) & 0xFF, lo & 0xFF);
+                }
+            }
+            function wBool(tag, v) { wInt8(tag, v ? 1 : 0); }
+            function wStr(tag, s) {
+                const b = new TextEncoder().encode(s);
+                if (b.length <= 255) { wHead(tag, 6); bytes.push(b.length); }
+                else { wHead(tag, 7); const l = b.length; bytes.push((l >> 24) & 0xFF, (l >> 16) & 0xFF, (l >> 8) & 0xFF, l & 0xFF); }
+                for (let i = 0; i < b.length; i++) bytes.push(b[i]);
+            }
+            function wBytes(tag, inner) {
+                wHead(tag, 13);
+                wHead(0, 0);
+                wInt32(0, inner.length);
+                for (let i = 0; i < inner.length; i++) bytes.push(inner[i]);
+            }
+            return { wInt64, wBool, wStr, wBytes, get: () => bytes };
+        }
+        function buildRegister() {
+            const oos = tarsOut();
+            oos.wInt64(0, ayyuid);
+            oos.wBool(1, ayyuid === 0);
+            oos.wStr(2, 'web_' + Date.now());
+            oos.wStr(3, '');
+            oos.wInt64(4, topSid);
+            oos.wInt64(5, subSid);
+            oos.wInt64(6, ayyuid);
+            oos.wInt64(7, 3);
+            const wscmd = tarsOut();
+            wscmd.wInt64(0, 1);
+            wscmd.wBytes(1, oos.get());
+            return new Uint8Array(wscmd.get()).buffer;
+        }
+        const HB = Uint8Array.from(atob('ABQdAAwsNgBM'), c => c.charCodeAt(0));
+        const ws = new WebSocket('wss://cdnws.api.huya.com');
+        ws.binaryType = 'arraybuffer';
+        dmWs = ws;
+        ws.onopen = () => {
+            ws.send(buildRegister());
+            setInterval(() => { if (ws.readyState === 1) ws.send(HB); }, 60000);
+        };
+        ws.onmessage = (e) => { try { parseHuyaMsg(new Uint8Array(e.data)); } catch(err) {} };
+        ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
+    }
+
+    function addChatMessage(nick, text) {
+        if (!danmakuEnabled || currentTab !== 'danmaku') return;
+        if (!text || !text.trim()) return;
+        currentChatList.push({ nick: nick.substring(0,30), text: text.substring(0,200) });
+        if (currentChatList.length > CHAT_MAX) currentChatList.shift();
+        renderChatMessages();
+    }
+
+    function renderChatMessages() {
+        if (!chatMessagesDiv) return;
+        if (!currentChatList.length) { chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>'; return; }
+        let html = '';
+        const start = Math.max(0, currentChatList.length - 150);
+        for (let i = start; i < currentChatList.length; i++) {
+            const msg = currentChatList[i];
+            html += `<div class="chat-msg"><span class="chat-nick">${escapeHtml(msg.nick)}</span><span class="chat-text">${escapeHtml(msg.text)}</span></div>`;
+        }
+        chatMessagesDiv.innerHTML = html;
+        const chatContent = document.getElementById('chat-content');
+        if (chatContent) chatContent.scrollTop = chatContent.scrollHeight;
+    }
+
+    // 强制 HTTPS（不经过代理）
+    function ensureHttps(url) {
+        if (!url) return url;
+        if (url.startsWith('https://')) return url;
+        if (url.startsWith('http://')) return url.replace('http://', 'https://');
+        return url;
+    }
+
+    // 播放器核心
+    async function goWithUrl(raw) {
+        if (!raw) return;
+        setBtn(true);
+        logStatus('处理中…');
+        const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
+        lastRoomUrl = isCDN ? '' : raw;
+        currentPlatform = getPlatformName(raw);
+        let streams = null;
+        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com'))) {
+            try {
+                const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const data = await resp.json();
+                if (data.error) throw new Error(data.error);
+                if (data.streams && data.streams.length) {
+                    // 所有流地址强制 HTTPS（不代理）
+                    streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
+                    currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                    currentAvatar = data.avatar || '';
+                    dmConfig = data.danmaku || null;
+                } else {
+                    throw new Error('未获取到流地址');
+                }
+            } catch(e) {
+                logStatus('❌ ' + e.message);
+                setBtn(false);
+                return;
+            }
+        } else if (isCDN) {
+            const fileName = raw.split('/').pop().split('?')[0] || '直链';
+            streams = [{ cdn: '直链', url: ensureHttps(raw), type: raw.includes('.m3u8') ? 'm3u8' : 'flv' }];
+            currentAnchorName = fileName;
+            currentAvatar = '';
+            currentPlatform = '直链';
+            dmConfig = null;
+        } else {
+            logStatus('❌ 不支持的链接，请提供直播间地址或直链');
+            setBtn(false);
+            return;
+        }
+        updatePageTitle(currentAnchorName, currentPlatform);
+        addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
+        playStream(streams);
+        setBtn(false);
+    }
+
+    function playStream(streams) {
+        if (art) { try { art.destroy(true); } catch(e){} art = null; }
+        if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
+        document.getElementById('player').innerHTML = '';
+        const s0 = streams[0];
+        const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
+        const qualityList = streams.length > 1 ? streams.map((s, i) => ({ default: i === 0, html: s.cdn, url: s.url, type: s.type || '' })) : [];
+        art = new Artplayer({
+            container: '#player',
+            url: s0.url,
+            type: artType,
+            isLive: true,
+            autoplay: true,
+            muted: savedMuted,
+            volume: savedVolume,
+            setting: false,
+            pip: true,
+            screenshot: false,
+            playbackRate: false,
+            aspectRatio: false,
+            fullscreenWeb: true,
+            lang: 'zh-cn',
+            quality: qualityList,
+            customType: {
+                flv: function(video, url) {
+                    if (video._mpegts) {
+                        try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){}
+                        video._mpegts = null;
+                    }
+                    const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
+                        enableWorker: true,
+                        enableStashBuffer: false,
+                        stashInitialSize: 64,
+                        liveBufferLatencyChasing: true,
+                        liveBufferLatencyMaxLatency: 5.0,
+                        liveBufferLatencyMinRemain: 0.5,
+                        autoCleanupSourceBuffer: true,
+                        autoCleanupMaxBackwardDuration: 10,
+                        autoCleanupMinBackwardDuration: 5,
+                        reconnectInterval: 5,
+                        reconnectAttempts: 3
+                    });
+                    player.attachMediaElement(video);
+                    player.load();
+                    video._mpegts = player;
+                    player.on(mpegts.Events.ERROR, (err) => {
+                        if (err.type === 'fatal' && art && lastRoomUrl) {
+                            console.warn('[flv] 致命错误，5秒后重新解析', err);
+                            const currentUrl = art.url;
+                            const nextQuality = (art.option.quality || []).find(q => q.url !== currentUrl);
+                            if (nextQuality) {
+                                art.switchQuality(nextQuality, true);
+                            } else {
+                                setTimeout(() => goWithUrl(lastRoomUrl), 5000);
+                            }
+                        }
+                    });
+                },
+                m3u8: function(video, url) {
+                    if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
+                    if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
+                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                        const hls = new Hls({
+                            liveSyncDurationCount: 2,
+                            liveMaxLatencyDurationCount: 5,
+                            lowLatencyMode: true,
+                            maxBufferLength: 8,
+                            maxMaxBufferLength: 16
+                        });
+                        hls.loadSource(url);
+                        hls.attachMedia(video);
+                        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                        hls.on(Hls.Events.ERROR, (e, data) => {
+                            if (data.fatal) {
+                                console.warn('[hls] 致命错误', data.type, data.details);
+                                hls.destroy();
+                                window._hlsInst = null;
+                            }
+                        });
+                        window._hlsInst = hls;
+                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                        video.src = url;
+                        video.play();
+                    } else {
+                        console.error('当前浏览器不支持 HLS 播放');
+                    }
+                }
+            }
+        });
+        art.on('ready', () => {
+            logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
+            updateFollowBtn(lastRoomUrl);
+            // 启动弹幕
+            if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+            if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
+                const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                startDouyuDanmaku(roomId);
+            } else if (dmConfig && dmConfig.platform === 'huya') {
+                startHuyaDanmaku(dmConfig);
+            }
+        });
+        art.on('video:volumechange', () => {
+            if (art) { savedVolume = art.volume; savedMuted = art.muted; saveVolumeMemory(); }
+        });
+        art.on('quality', (q) => {
+            if (!q) return;
+            logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
+            if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
+            if (art?.video?._mpegts) {
+                try { art.video._mpegts.unload(); art.video._mpegts.detachMediaElement(); art.video._mpegts.destroy(); } catch(e){}
+                art.video._mpegts = null;
+            }
+        });
+    }
+
+    function setBtn(loading) {
+        const btn = document.getElementById('btn-play');
+        if (btn) { btn.disabled = loading; btn.textContent = loading ? '…' : '播放'; }
+    }
+
+    // UI 标签页
+    function initTabs() {
+        const btns = document.querySelectorAll('.bar-tab');
+        const headerTitle = document.getElementById('header-title');
+        const headerAction = document.getElementById('header-action');
+        const dmSwitch = document.getElementById('danmaku-switch');
+        btns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                if (tab === currentTab) return;
+                currentTab = tab;
+                btns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                if (tab === 'danmaku') {
+                    headerTitle.innerText = '弹幕列表';
+                    dmSwitch.style.display = 'flex';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'none';
+                    renderChatMessages();
+                } else if (tab === 'follow') {
+                    headerTitle.innerText = '关注列表';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'block';
+                    headerAction.innerText = '刷新';
+                    headerAction.onclick = () => refreshAllFollowStatus();
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'flex';
+                    historyListDiv.style.display = 'none';
+                    renderFollowList();
+                } else if (tab === 'history') {
+                    headerTitle.innerText = '播放历史';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'flex';
+                    renderHistoryList();
+                }
+            });
+        });
+    }
+
+    function initDanmakuSwitch() {
+        const icon = document.getElementById('dm-switch-icon');
+        if (icon) {
+            icon.addEventListener('click', () => {
+                danmakuEnabled = !danmakuEnabled;
+                icon.textContent = danmakuEnabled ? '🔊' : '🔇';
+                icon.title = danmakuEnabled ? '关闭弹幕' : '开启弹幕';
+                if (!danmakuEnabled && dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+                else if (danmakuEnabled) {
+                    if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
+                        const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                        startDouyuDanmaku(roomId);
+                    } else if (dmConfig && dmConfig.platform === 'huya') {
+                        startHuyaDanmaku(dmConfig);
+                    }
+                }
+                if (currentTab === 'danmaku') {
+                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
+                    if (danmakuEnabled) renderChatMessages();
+                }
+            });
+        }
+    }
+
+    window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
+    window.toggleFollow = () => {
+        const url = document.getElementById('url').value.trim() || lastRoomUrl;
+        if (!url) { logStatus('请先输入或播放一个直播间'); return; }
+        const follows = _loadFollows();
+        const idx = follows.findIndex(x => x.url === url);
+        if (idx >= 0) {
+            follows.splice(idx, 1);
+            logStatus('已取消关注');
+        } else {
+            let name = currentAnchorName;
+            let platform = currentPlatform;
+            let avatar = currentAvatar;
+            const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'];
+            if (!name || defaultNames.includes(name)) {
+                const defaultName = url.split('/').pop().split('?')[0] || '主播';
+                const customName = prompt('请输入该主播的备注名', defaultName);
+                if (customName === null) return;
+                name = customName.trim() || defaultName;
+                platform = getPlatformName(url);
+                avatar = '';
+            }
+            follows.unshift({ url, name, platform, status: 'unknown', t: Date.now(), avatar: avatar || '' });
+            logStatus('已关注 ' + name);
+        }
+        _saveFollows(follows);
+        updateFollowBtn(url);
+        renderFollowList();
+    };
+    window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); else logStatus('当前播放的不是直播间地址'); };
+
+    function init() {
+        chatMessagesDiv = document.getElementById('chat-messages');
+        followListDiv = document.getElementById('follow-list');
+        historyListDiv = document.getElementById('history-list');
+        loadVolumeMemory();
+        initTabs();
+        initDanmakuSwitch();
+        renderFollowList();
+        renderHistoryList();
+        const urlInput = document.getElementById('url');
+        urlInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') window.go(); });
+        const urlParams = new URLSearchParams(window.location.search);
+        const autoUrl = urlParams.get('url');
+        if (autoUrl) { document.getElementById('url').value = autoUrl; window.go(); }
+        setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
+        refreshAllFollowStatus();
+    }
+    init();
+</script>
+</body>
+</html>
