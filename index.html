@@ -757,10 +757,10 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: false,          // 关闭缓冲池，减少延迟
+                        enableStashBuffer: true,          // 关闭缓冲池，减少延迟
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 10.0,  // 提高容忍度（斗鱼时间戳跳跃大）
+                        liveBufferLatencyMaxLatency: 6.0,  // 提高容忍度（斗鱼时间戳跳跃大）
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
