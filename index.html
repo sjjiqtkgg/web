@@ -87,7 +87,8 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-8fwn.onrender.com';
+    // 请修改为您的 FastAPI 后端地址（例如 http://127.0.0.1:8000 或 https://your-domain.com）
+    const API_BASE = 'https://live1-8fwn.onrender.com';   // ⚠️ 重要：改为您自己的后端地址
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -126,7 +127,7 @@
       return b2h(core(s2b(u),u.length*8));
     }
 
-    // ========== 斗鱼：前端签名 + 只保留腾讯/阿里 CDN（移除 ws/hw） ==========
+    // ========== 斗鱼：前端签名 + 获取所有 CDN（不过滤 hw/ws） ==========
     async function douyuSignAndPlay(roomId, crptext) {
         try {
             const did = 'a1f0b03c19b8e6b65f35d98404061501';
@@ -150,18 +151,17 @@
                 return { streams: [{ cdn: '斗鱼-HLS', url: d0.data.hls_url, type: 'm3u8' }] };
             }
 
-            // 获取 CDN 列表，只保留腾讯(tct/tx)和阿里(ali)
-            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(cdn => {
-                if (!cdn) return false;
-                const c = cdn.toLowerCase();
-                return c.includes('tct') || c.includes('tx') || c.includes('ali');
-            });
-            if (!cdns.length) cdns = ['tct-h5', 'ali-h5'];
+            // 获取所有 CDN（不再过滤，保留 hw, ws, tct, ali 等）
+            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(Boolean);
+            if (!cdns.length) cdns = ['tct-h5', 'ali-h5', 'hw-h5'];
 
-            // 排序：腾讯优先，阿里次之
+            // 排序：华为优先（因为用户实测 hw 不卡），然后腾讯，然后阿里，其余随意
             cdns.sort((a, b) => {
+                const isHw = c => c.toLowerCase().includes('hw');
                 const isTx = c => c.toLowerCase().includes('tct') || c.toLowerCase().includes('tx');
                 const isAli = c => c.toLowerCase().includes('ali');
+                if (isHw(a) && !isHw(b)) return -1;
+                if (!isHw(a) && isHw(b)) return 1;
                 if (isTx(a) && !isTx(b)) return -1;
                 if (!isTx(a) && isTx(b)) return 1;
                 if (isAli(a) && !isAli(b)) return -1;
@@ -170,25 +170,22 @@
             });
 
             const streams = [];
-            await Promise.all(cdns.slice(0, 3).map(async cdn => {
+            await Promise.all(cdns.slice(0, 4).map(async cdn => {
                 try {
                     const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=0` });
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
                         let url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
-                        // 强制替换 ws/hw 为腾讯/阿里（二次保险）
-                        url = url.replace(/ws-h5\.douyucdn\.cn/g, 'tct-h5.douyucdn.cn');
-                        url = url.replace(/hw-h5\.douyucdn\.cn/g, 'ali-h5.douyucdn.cn');
+                        // 不再做任何域名替换，保留原始 CDN
                         streams.push({ cdn: cdn, url: url, type: 'flv' });
                     }
                 } catch(e) {}
             }));
 
             if (!streams.length) {
+                // 降级：使用原始返回的第一个流
                 let fallbackUrl = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
-                fallbackUrl = fallbackUrl.replace(/ws-h5\.douyucdn\.cn/g, 'tct-h5.douyucdn.cn');
-                fallbackUrl = fallbackUrl.replace(/hw-h5\.douyucdn\.cn/g, 'ali-h5.douyucdn.cn');
-                streams.push({ cdn: 'tct', url: fallbackUrl, type: 'flv' });
+                streams.push({ cdn: 'default', url: fallbackUrl, type: 'flv' });
             }
             return { streams };
         } catch(e) {
@@ -687,7 +684,7 @@
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
                 if (data.client) {
-                    // 斗鱼单独处理（前端签名 + CDN过滤）
+                    // 斗鱼专用：前端签名
                     if (raw.includes('douyu.com')) {
                         const cd = await douyuSignAndPlay(data.roomId, data.crptext);
                         if (!cd) throw new Error('斗鱼签名失败');
@@ -696,9 +693,7 @@
                         currentAvatar = data.avatar || '';
                         currentPlatform = '斗鱼';
                     } else {
-                        // B站/抖音等其他平台（保持原有后端解析，但需要前端实现 clientParse）
-                        // 由于 Worker 中已移除 B站抖音弹幕，这里简单报错
-                        throw new Error('当前 Worker 不支持 B站/抖音解析，请使用直链或更换后端');
+                        throw new Error('后端返回 client 模式但非斗鱼，暂不支持');
                     }
                 } else if (data.streams && data.streams.length) {
                     streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
@@ -765,7 +760,7 @@
                         enableStashBuffer: false,          // 关闭缓冲池，减少延迟
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 7.0,   // 提高容忍度（斗鱼时间戳跳跃大）
+                        liveBufferLatencyMaxLatency: 10.0,  // 提高容忍度（斗鱼时间戳跳跃大）
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
@@ -778,20 +773,20 @@
                     player.load();
                     video._mpegts = player;
 
-                    // 超时检测：12秒未播放则重新加载
+                    // 超时检测：15秒未播放则尝试切换 CDN
                     let playingFlag = false;
                     const onPlaying = () => { playingFlag = true; clearTimeout(playStartTimer); };
                     video.addEventListener('playing', onPlaying);
                     const playStartTimer = setTimeout(() => {
                         if (!playingFlag && art && lastRoomUrl) {
-                            console.warn('[flv] 12秒未开始播放，尝试切换 CDN 或重新加载');
+                            console.warn('[flv] 15秒未开始播放，尝试切换 CDN 或重新加载');
                             const currentQuality = art.quality;
                             const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
                             if (nextQuality) art.switchQuality(nextQuality);
                             else goWithUrl(lastRoomUrl);
                         }
                         video.removeEventListener('playing', onPlaying);
-                    }, 12000);
+                    }, 15000);
 
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
