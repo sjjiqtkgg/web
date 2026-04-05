@@ -756,14 +756,14 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: false,      // 关闭预缓冲，直播必须 false，true 会卡在 currentTime=0
-                        stashInitialSize: 64,
+                        enableStashBuffer: false,      
+                        stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 7.0,
+                        liveBufferLatencyMaxLatency: 5.0,
                         liveBufferLatencyMinRemain: 0.5,
                         autoCleanupSourceBuffer: true,
-                        autoCleanupMaxBackwardDuration: 8,
-                        autoCleanupMinBackwardDuration: 4,
+                        autoCleanupMaxBackwardDuration: 10,
+                        autoCleanupMinBackwardDuration: 5,
                         fixAudioTimestampGap: true
                     });
                     player.attachMediaElement(video);
