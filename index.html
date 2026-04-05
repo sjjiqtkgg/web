@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-1.onrender.com';   // ⚠️ 重要：改为您自己的后端地址
+    const API_BASE = 'https://live1-8fwn.onrender.com';   // ⚠️ 重要：改为您自己的后端地址
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -145,46 +145,46 @@
             const d0 = await r0.json();
             if (d0.error !== 0) throw new Error('斗鱼拉流: ' + (d0.msg || d0.error));
 
-            // 优先 HLS
-            if (d0.data.hls_url && d0.data.hls_url.startsWith('http')) {
-                return { streams: [{ cdn: '斗鱼-HLS', url: d0.data.hls_url, type: 'm3u8' }] };
-            }
-
-            // 获取所有 CDN（不再过滤，保留 hw, ws, tct, ali 等）
-            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(Boolean);
+            // CDN 优先级：tct(腾讯) > ali(阿里) > hw(华为) > 其他，排除 scdn
+            let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(x => x && !x.startsWith('scdn'));
             if (!cdns.length) cdns = ['tct-h5', 'ali-h5', 'hw-h5'];
 
-            // 排序：华为优先（因为用户实测 hw 不卡），然后腾讯，然后阿里，其余随意
-            cdns.sort((a, b) => {
-                const isHw = c => c.toLowerCase().includes('hw');
-                const isTx = c => c.toLowerCase().includes('tct') || c.toLowerCase().includes('tx');
-                const isAli = c => c.toLowerCase().includes('ali');
-                if (isHw(a) && !isHw(b)) return -1;
-                if (!isHw(a) && isHw(b)) return 1;
-                if (isTx(a) && !isTx(b)) return -1;
-                if (!isTx(a) && isTx(b)) return 1;
-                if (isAli(a) && !isAli(b)) return -1;
-                if (!isAli(a) && isAli(b)) return 1;
-                return 0;
-            });
+            const cdnRank = c => {
+                c = c.toLowerCase();
+                if (c.includes('tct') || c.includes('tx')) return 0;
+                if (c.includes('ali')) return 1;
+                if (c.includes('hw')) return 2;
+                return 3;
+            };
+            // 按优先级排序，保持 index 以便串行填充（顺序不乱）
+            const sortedCdns = cdns.slice(0, 4).sort((a, b) => cdnRank(a) - cdnRank(b));
 
+            // 串行请求，保证 streams 顺序与 CDN 优先级一致
             const streams = [];
-            await Promise.all(cdns.slice(0, 4).map(async cdn => {
+            for (const cdn of sortedCdns) {
                 try {
                     const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=0` });
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
-                        let url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
-                        // 不再做任何域名替换，保留原始 CDN
-                        streams.push({ cdn: cdn, url: url, type: 'flv' });
+                        const url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
+                        // CDN 名称友好化显示
+                        const label = cdn.includes('tct') ? '腾讯云' :
+                                      cdn.includes('ali') ? '阿里云' :
+                                      cdn.includes('hw')  ? '华为云' : cdn;
+                        streams.push({ cdn: label, url: ensureHttps(url), type: 'flv' });
                     }
                 } catch(e) {}
-            }));
+            }
+
+            // 把 HLS 加在最后作为备用选项（不优先）
+            if (d0.data.hls_url && d0.data.hls_url.startsWith('http')) {
+                streams.push({ cdn: 'HLS备用', url: ensureHttps(d0.data.hls_url), type: 'm3u8' });
+            }
 
             if (!streams.length) {
-                // 降级：使用原始返回的第一个流
-                let fallbackUrl = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
-                streams.push({ cdn: 'default', url: fallbackUrl, type: 'flv' });
+                // 终极降级
+                const fallback = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
+                streams.push({ cdn: '斗鱼', url: ensureHttps(fallback), type: 'flv' });
             }
             return { streams };
         } catch(e) {
@@ -756,40 +756,36 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: false,      
+                        enableStashBuffer: true, 
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
-                        liveBufferLatencyMinRemain: 0.5,
+                        liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
-                        autoCleanupMaxBackwardDuration: 10,
-                        autoCleanupMinBackwardDuration: 5,
-                        fixAudioTimestampGap: true
+                        autoCleanupMaxBackwardDuration: 14,
+                        autoCleanupMinBackwardDuration: 6,
+                        reconnectInterval: 5,
+                        reconnectAttempts: 3,
+                        fixAudioTimestampGap: false
                     });
                     player.attachMediaElement(video);
                     player.load();
                     video._mpegts = player;
 
-                    // 卡顿检测：5s 内 currentTime 未推进则切 CDN
-                    let lastTime = -1, stallCount = 0;
-                    const stallTimer = setInterval(() => {
-                        if (!art || !video) { clearInterval(stallTimer); return; }
-                        const ct = video.currentTime;
-                        if (ct === lastTime && !video.paused) {
-                            stallCount++;
-                            if (stallCount >= 2) { // 连续2次（约5s）未推进
-                                clearInterval(stallTimer);
-                                console.warn('[flv] 检测到卡顿，尝试切 CDN');
-                                const curQ = art.quality;
-                                const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
-                                if (nxt) art.switchQuality(nxt);
-                                else if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
-                            }
-                        } else {
-                            stallCount = 0;
+                    // 超时检测：15秒未播放则尝试切换 CDN
+                    let playingFlag = false;
+                    const onPlaying = () => { playingFlag = true; clearTimeout(playStartTimer); };
+                    video.addEventListener('playing', onPlaying);
+                    const playStartTimer = setTimeout(() => {
+                        if (!playingFlag && art && lastRoomUrl) {
+                            console.warn('[flv] 15秒未开始播放，尝试切换 CDN 或重新加载');
+                            const currentQuality = art.quality;
+                            const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
+                            if (nextQuality) art.switchQuality(nextQuality);
+                            else goWithUrl(lastRoomUrl);
                         }
-                        lastTime = ct;
-                    }, 2500);
+                        video.removeEventListener('playing', onPlaying);
+                    }, 15000);
 
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
