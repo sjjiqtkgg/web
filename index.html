@@ -129,7 +129,9 @@
     // ========== 斗鱼：前端签名 + 获取所有 CDN（不过滤 hw/ws） ==========
     async function douyuSignAndPlay(roomId, crptext) {
         try {
-            const did = 'a1f0b03c19b8e6b65f35d98404061501';
+            // 随机生成 did，避免固定 did 被斗鱼封禁
+            const did = 'a1f0b03c' + Math.random().toString(16).slice(2,10) +
+                        Math.random().toString(16).slice(2,10) + '01';
             const tt  = String(Math.floor(Date.now() / 1000));
             const cryptoShim = 'var CryptoJS={MD5:function(s){' + ub98484234_md5.toString() +
                                ';return{toString:function(){return ub98484234_md5(s);}};},enc:{Hex:{}}};';
