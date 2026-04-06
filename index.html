@@ -230,13 +230,24 @@
     }
     function saveVolumeMemory() { localStorage.setItem('ps_volume', savedVolume); localStorage.setItem('ps_muted', savedMuted); }
 
+    // 增强版页面标题设置，防止虎牙只显示“虎牙”
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
+        // 防御：如果 anchorName 是默认值且 platform 是虎牙，尝试从 lastRoomUrl 提取房间号或用户自定义
+        if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) {
+            const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+            anchorName = `房间 ${roomId}`;
+        }
         const hasRealName = anchorName && !defaultNames.includes(anchorName) && !anchorName.includes('直链');
-        if (hasRealName && platform && platform !== '未知') document.title = platform + ' ' + anchorName;
-        else if (platform && platform !== '未知') document.title = platform;
-        else if (anchorName && !defaultNames.includes(anchorName)) document.title = anchorName;
-        else document.title = '聚合直播';
+        if (hasRealName && platform && platform !== '未知') {
+            document.title = platform + ' ' + anchorName;
+        } else if (platform && platform !== '未知') {
+            document.title = platform;
+        } else if (anchorName && !defaultNames.includes(anchorName)) {
+            document.title = anchorName;
+        } else {
+            document.title = '聚合直播';
+        }
     }
 
     function getPlatformName(url) {
