@@ -756,8 +756,8 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: true, 
-                        stashInitialSize: 128,
+                        enableStashBuffer: false,      // 直播必须 false，true 会卡在 currentTime=0
+                        stashInitialSize: 64,
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
                         liveBufferLatencyMinRemain: 0.7,
@@ -772,28 +772,42 @@
                     player.load();
                     video._mpegts = player;
 
-                    // 超时检测：15秒未播放则尝试切换 CDN
-                    let playingFlag = false;
-                    const onPlaying = () => { playingFlag = true; clearTimeout(playStartTimer); };
-                    video.addEventListener('playing', onPlaying);
-                    const playStartTimer = setTimeout(() => {
-                        if (!playingFlag && art && lastRoomUrl) {
-                            console.warn('[flv] 15秒未开始播放，尝试切换 CDN 或重新加载');
-                            const currentQuality = art.quality;
-                            const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
-                            if (nextQuality) art.switchQuality(nextQuality);
-                            else goWithUrl(lastRoomUrl);
-                        }
-                        video.removeEventListener('playing', onPlaying);
-                    }, 15000);
+                    // 卡顿检测：每2.5s检查 currentTime 是否推进
+                    let lastTime = -1, stallCount = 0;
+                    const stallTimer = setInterval(() => {
+                        if (!art || !video) { clearInterval(stallTimer); return; }
+                        const ct = video.currentTime;
+                        if (ct === lastTime && !video.paused && !video.ended) {
+                            stallCount++;
+                            if (stallCount >= 2) {
+                                clearInterval(stallTimer);
+                                console.warn('[flv] 卡顿检测触发，尝试切 CDN');
+                                const curQ = art.quality;
+                                const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
+                                if (nxt) art.switchQuality(nxt);
+                                else if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                            }
+                        } else { stallCount = 0; }
+                        lastTime = ct;
+                    }, 2500);
 
+                    // ★ MediaSource ended = token过期/CDN断流，自动重解析
+                    video.addEventListener('ended', function onFlvEnded() {
+                        if (!lastRoomUrl) return;
+                        console.warn('[flv] 流已结束(onSourceEnded)，token可能过期，1秒后重新解析...');
+                        clearInterval(stallTimer);
+                        setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
+                    });
+
+                    // mpegts 致命错误
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
-                            console.warn('[flv] 致命错误，尝试切换画质或重新加载', err);
-                            const currentQuality = art.quality;
-                            const nextQuality = art.qualityList && art.qualityList.find(q => q.html !== currentQuality.html);
-                            if (nextQuality) art.switchQuality(nextQuality);
-                            else goWithUrl(lastRoomUrl);
+                            console.warn('[flv] 致命错误，尝试切 CDN', err);
+                            clearInterval(stallTimer);
+                            const curQ = art.quality;
+                            const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
+                            if (nxt) art.switchQuality(nxt);
+                            else setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                         }
                     });
                 },
