@@ -200,7 +200,7 @@
     let danmakuEnabled = true;
     let currentTab = 'danmaku';
     let dmWs = null;
-    let douyinWs = null;          // 新增：抖音弹幕 WebSocket
+    let douyinWs = null;
     let dmConfig = null;
     let currentChatList = [];
     const CHAT_MAX = 300;
@@ -654,7 +654,6 @@
 
         ws.onopen = () => {
             console.log('[抖音弹幕] 已连接房间', roomId);
-            // 心跳保活
             const heartbeat = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send('ping');
@@ -665,20 +664,18 @@
         };
 
         ws.onmessage = (event) => {
+            if (event.data === 'pong') return;
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.type === 'chat' && msg.nick && msg.content) {
                     addChatMessage(msg.nick, msg.content);
                 } else if (msg.type === 'gift') {
                     addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
-                } else if (msg.type === 'enter') {
-                    // 进场消息可选，可能太多
-                    // addChatMessage(msg.nick, msg.action);
                 } else if (msg.type === 'like') {
                     addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
                 }
             } catch(e) {
-                console.error('[抖音弹幕] 解析错误', e);
+                console.error('[抖音弹幕] 解析错误', e, event.data);
             }
         };
 
@@ -754,6 +751,10 @@
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     dmConfig = data.danmaku || null;
+                    // 保存抖音 roomId 用于弹幕
+                    if (raw.includes('douyin.com') && data.roomId) {
+                        window._douyinRoomId = data.roomId;
+                    }
                 } else {
                     throw new Error('未获取到流地址');
                 }
@@ -897,7 +898,6 @@
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
-            // 关闭之前的弹幕连接
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
             if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
 
@@ -907,8 +907,7 @@
             } else if (dmConfig && dmConfig.platform === 'huya') {
                 startHuyaDanmaku(dmConfig);
             } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                // 新增：抖音弹幕
-                const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                const roomId = window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0];
                 startDouyinDanmaku(roomId);
             }
         });
@@ -991,7 +990,7 @@
                     } else if (dmConfig && dmConfig.platform === 'huya') {
                         startHuyaDanmaku(dmConfig);
                     } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                        const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                        const roomId = window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0];
                         startDouyinDanmaku(roomId);
                     }
                 }
