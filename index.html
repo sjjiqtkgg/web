@@ -126,10 +126,9 @@
       return b2h(core(s2b(u),u.length*8));
     }
 
-    // ========== 斗鱼：前端签名 + 获取所有 CDN（不过滤 hw/ws） ==========
+    // ========== 斗鱼：前端签名 + 获取所有 CDN ==========
     async function douyuSignAndPlay(roomId, crptext) {
         try {
-            // 随机生成 did，避免固定 did 被斗鱼封禁
             const did = 'a1f0b03c' + Math.random().toString(16).slice(2,10) +
                         Math.random().toString(16).slice(2,10) + '01';
             const tt  = String(Math.floor(Date.now() / 1000));
@@ -147,7 +146,6 @@
             const d0 = await r0.json();
             if (d0.error !== 0) throw new Error('斗鱼拉流: ' + (d0.msg || d0.error));
 
-            // CDN 优先级：tct(腾讯) > ali(阿里) > hw(华为) > 其他，排除 scdn
             let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(x => x && !x.startsWith('scdn'));
             if (!cdns.length) cdns = ['tct-h5', 'ali-h5', 'hw-h5'];
 
@@ -158,10 +156,8 @@
                 if (c.includes('hw')) return 2;
                 return 3;
             };
-            // 按优先级排序，保持 index 以便串行填充（顺序不乱）
             const sortedCdns = cdns.slice(0, 4).sort((a, b) => cdnRank(a) - cdnRank(b));
 
-            // 串行请求，保证 streams 顺序与 CDN 优先级一致
             const streams = [];
             for (const cdn of sortedCdns) {
                 try {
@@ -169,7 +165,6 @@
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
                         const url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
-                        // CDN 名称友好化显示
                         const label = cdn.includes('tct') ? '腾讯云' :
                                       cdn.includes('ali') ? '阿里云' :
                                       cdn.includes('hw')  ? '华为云' : cdn;
@@ -178,13 +173,11 @@
                 } catch(e) {}
             }
 
-            // 把 HLS 加在最后作为备用选项（不优先）
             if (d0.data.hls_url && d0.data.hls_url.startsWith('http')) {
                 streams.push({ cdn: 'HLS备用', url: ensureHttps(d0.data.hls_url), type: 'm3u8' });
             }
 
             if (!streams.length) {
-                // 终极降级
                 const fallback = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
                 streams.push({ cdn: '斗鱼', url: ensureHttps(fallback), type: 'flv' });
             }
@@ -207,6 +200,7 @@
     let danmakuEnabled = true;
     let currentTab = 'danmaku';
     let dmWs = null;
+    let douyinWs = null;          // 新增：抖音弹幕 WebSocket
     let dmConfig = null;
     let currentChatList = [];
     const CHAT_MAX = 300;
@@ -232,10 +226,8 @@
     }
     function saveVolumeMemory() { localStorage.setItem('ps_volume', savedVolume); localStorage.setItem('ps_muted', savedMuted); }
 
-    // 增强版页面标题设置，防止虎牙只显示“虎牙”
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
-        // 防御：如果 anchorName 是默认值且 platform 是虎牙，尝试从 lastRoomUrl 提取房间号或用户自定义
         if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) {
             const roomId = lastRoomUrl.split('/').pop().split('?')[0];
             anchorName = `房间 ${roomId}`;
@@ -651,6 +643,57 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
+    // ==================== 抖音弹幕（通过后端 WebSocket 中继） ====================
+    function startDouyinDanmaku(roomId) {
+        if (!danmakuEnabled || !roomId) return;
+        if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+
+        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
+        const ws = new WebSocket(wsUrl);
+        douyinWs = ws;
+
+        ws.onopen = () => {
+            console.log('[抖音弹幕] 已连接房间', roomId);
+            // 心跳保活
+            const heartbeat = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send('ping');
+                } else {
+                    clearInterval(heartbeat);
+                }
+            }, 30000);
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'chat' && msg.nick && msg.content) {
+                    addChatMessage(msg.nick, msg.content);
+                } else if (msg.type === 'gift') {
+                    addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
+                } else if (msg.type === 'enter') {
+                    // 进场消息可选，可能太多
+                    // addChatMessage(msg.nick, msg.action);
+                } else if (msg.type === 'like') {
+                    addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
+                }
+            } catch(e) {
+                console.error('[抖音弹幕] 解析错误', e);
+            }
+        };
+
+        ws.onclose = () => {
+            console.log('[抖音弹幕] 连接断开');
+            if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+                setTimeout(() => startDouyinDanmaku(roomId), 3000);
+            }
+        };
+
+        ws.onerror = (e) => {
+            console.error('[抖音弹幕] 错误', e);
+        };
+    }
+
     function addChatMessage(nick, text) {
         if (!danmakuEnabled || currentTab !== 'danmaku') return;
         if (!text || !text.trim()) return;
@@ -696,7 +739,6 @@
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
                 if (data.client) {
-                    // 斗鱼专用：前端签名
                     if (raw.includes('douyu.com')) {
                         const cd = await douyuSignAndPlay(data.roomId, data.crptext);
                         if (!cd) throw new Error('斗鱼签名失败');
@@ -769,7 +811,7 @@
                     }
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
-                        enableStashBuffer: false,      // 直播必须 false，true 会卡在 currentTime=0
+                        enableStashBuffer: false,
                         stashInitialSize: 64,
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
@@ -785,7 +827,6 @@
                     player.load();
                     video._mpegts = player;
 
-                    // 卡顿检测：每2.5s检查 currentTime 是否推进
                     let lastTime = -1, stallCount = 0;
                     const stallTimer = setInterval(() => {
                         if (!art || !video) { clearInterval(stallTimer); return; }
@@ -804,7 +845,6 @@
                         lastTime = ct;
                     }, 2500);
 
-                    // ★ MediaSource ended = token过期/CDN断流，自动重解析
                     video.addEventListener('ended', function onFlvEnded() {
                         if (!lastRoomUrl) return;
                         console.warn('[flv] 流已结束(onSourceEnded)，token可能过期，1秒后重新解析...');
@@ -812,7 +852,6 @@
                         setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
                     });
 
-                    // mpegts 致命错误
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
                             console.warn('[flv] 致命错误，尝试切 CDN', err);
@@ -858,12 +897,19 @@
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
+            // 关闭之前的弹幕连接
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+            if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+
             if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                 const roomId = lastRoomUrl.split('/').pop().split('?')[0];
                 startDouyuDanmaku(roomId);
             } else if (dmConfig && dmConfig.platform === 'huya') {
                 startHuyaDanmaku(dmConfig);
+            } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+                // 新增：抖音弹幕
+                const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                startDouyinDanmaku(roomId);
             }
         });
         art.on('video:volumechange', () => {
@@ -935,13 +981,18 @@
                 danmakuEnabled = !danmakuEnabled;
                 icon.textContent = danmakuEnabled ? '🔊' : '🔇';
                 icon.title = danmakuEnabled ? '关闭弹幕' : '开启弹幕';
-                if (!danmakuEnabled && dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-                else if (danmakuEnabled) {
+                if (!danmakuEnabled) {
+                    if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+                    if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+                } else {
                     if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                         const roomId = lastRoomUrl.split('/').pop().split('?')[0];
                         startDouyuDanmaku(roomId);
                     } else if (dmConfig && dmConfig.platform === 'huya') {
                         startHuyaDanmaku(dmConfig);
+                    } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+                        const roomId = lastRoomUrl.split('/').pop().split('?')[0];
+                        startDouyinDanmaku(roomId);
                     }
                 }
                 if (currentTab === 'danmaku') {
