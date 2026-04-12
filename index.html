@@ -836,8 +836,8 @@
                     let lastTime = -1, stallCount = 0;
                     const stallTimer = setInterval(() => {
                         if (!art || !video) { clearInterval(stallTimer); return; }
-                        // seek 后给 8 秒宽限期，避免追帧 seek 被误判为卡顿
-                        if (Date.now() - lastSeekTime < 8000) { lastTime = video.currentTime; stallCount = 0; return; }
+                        // seek 后给 12 秒宽限期，避免追帧 seek 被误判为卡顿
+                        if (Date.now() - lastSeekTime < 12000) { lastTime = video.currentTime; stallCount = 0; return; }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
@@ -944,6 +944,14 @@
         if (navigator.locks) {
             navigator.locks.request('live-keepalive', { mode: 'shared' }, () => new Promise(() => {}));
         }
+        // Media Session API：告诉 Chrome 这是活跃媒体，提升后台优先级
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: currentAnchorName || '直播',
+                artist: currentPlatform || ''
+            });
+            navigator.mediaSession.playbackState = 'playing';
+        }
     }
 
     // 2. 跳到直播边缘（立即追帧）
@@ -955,14 +963,14 @@
             if (buf.length > 0) {
                 const liveEdge = buf.end(buf.length - 1);
                 if (liveEdge - video.currentTime > 3) {
-                    lastSeekTime = Date.now(); // 记录 seek 时间，避免卡顿检测误判
+                    lastSeekTime = Date.now();
                     video.currentTime = liveEdge - 0.5;
                 }
             }
         } catch(e) {}
     }
 
-    // 3. 后台定期追帧（防止后台慢慢积压）
+    // 3. 后台定期追帧：阈值降到 3 秒，在缓冲积满前就跳
     function startLiveEdgeChaser() {
         if (liveEdgeChaserTimer) clearInterval(liveEdgeChaserTimer);
         liveEdgeChaserTimer = setInterval(() => {
@@ -972,13 +980,13 @@
                 const buf = video.buffered;
                 if (buf.length > 0) {
                     const liveEdge = buf.end(buf.length - 1);
-                    if (liveEdge - video.currentTime > 8) {
-                        lastSeekTime = Date.now(); // 记录 seek 时间，避免卡顿检测误判
+                    if (liveEdge - video.currentTime > 3) {
+                        lastSeekTime = Date.now();
                         video.currentTime = liveEdge - 0.5;
                     }
                 }
             } catch(e) {}
-        }, 3000);
+        }, 2000);  // 每 2 秒检查一次，比之前的 3 秒更频繁
     }
 
     function stopLiveEdgeChaser() {
