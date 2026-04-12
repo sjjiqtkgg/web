@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-cxe9.onrender.com';   // ⚠️ 重要：改为您自己的后端地址
+    const API_BASE = 'https://live1-cxe9.onrender.com';   // 如果本地穿透，改为你的隧道地址
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -193,7 +193,7 @@
     let art = null;
     let lastRoomUrl = '';
     let savedVolume = 0.5;
-    let savedMuted = false;
+    let savedMuted = true;   // 默认静音，确保自动播放
     let currentAnchorName = '';
     let currentPlatform = '';
     let currentAvatar = '';
@@ -751,7 +751,6 @@
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     dmConfig = data.danmaku || null;
-                    // 保存抖音 roomId 用于弹幕
                     if (raw.includes('douyin.com') && data.roomId) {
                         window._douyinRoomId = data.roomId;
                     }
@@ -794,7 +793,7 @@
             type: artType,
             isLive: true,
             autoplay: true,
-            muted: savedMuted,
+            muted: savedMuted,      // 默认 true，确保自动播放
             volume: savedVolume,
             setting: false,
             pip: true,
@@ -813,13 +812,16 @@
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
                         enableStashBuffer: false,
-                        stashInitialSize: 64,
+                        stashInitialSize: 128,        // 与 lemon-live 一致
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
                         autoCleanupMinBackwardDuration: 6,
+                        lazyLoad: true,               // 新增：懒加载
+                        lazyLoadMaxDuration: 3 * 60,
+                        lazyLoadRecoverDuration: 30,
                         reconnectInterval: 5,
                         reconnectAttempts: 3,
                         fixAudioTimestampGap: false
@@ -924,6 +926,18 @@
             }
         });
     }
+
+    // 处理后台标签页恢复
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && art && art.playing) {
+            // 标签页重新可见时，强制刷新缓冲区
+            const video = art.video;
+            if (video) {
+                const currentTime = video.currentTime;
+                video.currentTime = currentTime;  // 触发 seek 刷新缓冲区
+            }
+        }
+    });
 
     function setBtn(loading) {
         const btn = document.getElementById('btn-play');
