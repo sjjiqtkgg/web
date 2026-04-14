@@ -21,31 +21,16 @@
         .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
         .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
         #main { flex: 1; display: flex; min-height: 0; }
-        #player-container { flex: 1; background: #000; position: relative; display: flex; flex-direction: column; overflow: visible; }
-        #player { width: 100%; flex: 1; min-height: 0; position: relative; overflow: visible; }
-        /* 让 ArtPlayer 控制栏溢出到下方黑底栏内，不遮挡直播画面 */
-        #player .art-video-player { overflow: visible !important; }
-        #player .art-controls {
-            bottom: -50px !important;
-            background: transparent !important;
-            border-radius: 0 !important;
-            height: 50px !important;
-            display: flex !important;
-            align-items: center !important;
-            /* 常驻显示，不随鼠标隐藏 */
-            opacity: 1 !important;
-            visibility: visible !important;
-            transform: none !important;
-            transition: none !important;
-        }
-        /* 黑底栏背景 */
-        #video-ctrl-bar {
-            height: 50px;
-            background: #111;
-            flex-shrink: 0;
-            cursor: default;
-            border-top: 1px solid #222;
-        }
+        #player-container { flex: 1; background: #000; position: relative; display: flex; flex-direction: column; }
+        /* 视频区域自适应，底部黑边固定高度 */
+        #player { flex: 1; width: 100%; background: #000; }
+        /* 底部黑边信息栏 */
+        #info-bar { height: 36px; background: #000; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #eee; font-size: 14px; border-top: 1px solid #1a1a1a; flex-shrink: 0; }
+        #info-left { display: flex; align-items: center; gap: 16px; }
+        #info-line { font-weight: normal; }
+        #info-line.tencent { font-weight: bold; color: #f5a623; }
+        #info-volume { color: #aaa; }
+        #info-time { color: #aaa; }
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
         .chat-header span { color: #f5a623; font-weight: 500; }
@@ -70,6 +55,9 @@
         .follow-delete { color: #666; padding: 0 4px; font-size: 16px; }
         .follow-delete:hover { color: #f44336; }
         .history-time { font-size: 10px; color: #888; }
+        /* 隐藏 ArtPlayer 默认控制栏 */
+        .artplayer-controls { display: none !important; }
+        .artplayer-mask { display: none !important; }
         @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
     </style>
 </head>
@@ -86,7 +74,16 @@
 <div id="main">
     <div id="player-container">
         <div id="player"></div>
-        <div id="video-ctrl-bar"></div>
+        <div id="info-bar">
+            <div id="info-left">
+                <span id="info-line">—</span>
+            </div>
+            <div id="info-right">
+                <span id="info-volume">🔊 100%</span>
+                <span style="margin:0 8px;color:#444;">|</span>
+                <span id="info-time">00:00</span>
+            </div>
+        </div>
     </div>
     <div id="chat-panel">
         <div class="chat-header">
@@ -233,13 +230,19 @@
     let historyListDiv = null;
     let sortable = null;
     const HISTORY_MAX = 30;
+    let timeInterval = null;
+
+    // UI 元素
+    const infoLine = document.getElementById('info-line');
+    const infoVolume = document.getElementById('info-volume');
+    const infoTime = document.getElementById('info-time');
 
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
     function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
 
-    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
+    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'>':'&gt;'); }
     function logStatus(msg) { console.log('[状态]', msg); }
 
     function loadVolumeMemory() {
@@ -274,6 +277,30 @@
         if (url.includes('bilibili.com')) return 'B站';
         if (url.includes('douyin.com')) return '抖音';
         return '未知';
+    }
+
+    // 更新时间显示
+    function updateTimeDisplay() {
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2, '0');
+        const m = String(now.getMinutes()).padStart(2, '0');
+        infoTime.textContent = `${h}:${m}`;
+    }
+
+    // 更新音量显示
+    function updateVolumeDisplay(volume, muted) {
+        const vol = muted ? 0 : Math.round(volume * 100);
+        infoVolume.textContent = `🔊 ${vol}%`;
+    }
+
+    // 更新线路显示
+    function updateLineDisplay(cdnName) {
+        infoLine.textContent = cdnName || '—';
+        if (cdnName && cdnName.includes('腾讯')) {
+            infoLine.classList.add('tencent');
+        } else {
+            infoLine.classList.remove('tencent');
+        }
     }
 
     function addToHistory(url, name, platform, avatar) {
@@ -811,14 +838,20 @@
         const s0 = streams[0];
         const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
         const qualityList = streams.length > 1 ? streams.map((s, i) => ({ default: i === 0, html: s.cdn, url: s.url, type: s.type || '' })) : [];
+        
+        // 更新底部线路显示
+        updateLineDisplay(s0.cdn);
+        updateVolumeDisplay(savedVolume, savedMuted);
+
         art = new Artplayer({
             container: '#player',
             url: s0.url,
             type: artType,
             isLive: true,
             autoplay: true,
-            muted: savedMuted,      // 默认 true，确保自动播放
+            muted: savedMuted,
             volume: savedVolume,
+            controls: false,  // 完全隐藏自带控件
             setting: false,
             pip: true,
             screenshot: false,
@@ -836,14 +869,14 @@
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
                         enableStashBuffer: false,
-                        stashInitialSize: 128,        // 与 lemon-live 一致
+                        stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
                         autoCleanupMinBackwardDuration: 6,
-                        lazyLoad: true,               // 新增：懒加载
+                        lazyLoad: true,
                         lazyLoadMaxDuration: 3 * 60,
                         lazyLoadRecoverDuration: 30,
                         reconnectInterval: 5,
@@ -921,6 +954,7 @@
                 }
             }
         });
+
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
@@ -937,28 +971,48 @@
                 startDouyinDanmaku(roomId);
             }
         });
+
         art.on('video:volumechange', () => {
-            if (art) { savedVolume = art.volume; savedMuted = art.muted; saveVolumeMemory(); }
+            if (art) {
+                savedVolume = art.volume;
+                savedMuted = art.muted;
+                saveVolumeMemory();
+                updateVolumeDisplay(savedVolume, savedMuted);
+            }
         });
+
         art.on('quality', (q) => {
             if (!q) return;
             logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
+            updateLineDisplay(q.html);
             if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
             if (art?.video?._mpegts) {
                 try { art.video._mpegts.unload(); art.video._mpegts.detachMediaElement(); art.video._mpegts.destroy(); } catch(e){}
                 art.video._mpegts = null;
             }
         });
+
+        // 手动添加音量控制快捷键（↑/↓）
+        const handleKey = (e) => {
+            if (!art) return;
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                art.volume = Math.min(1, art.volume + 0.05);
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                art.volume = Math.max(0, art.volume - 0.05);
+            }
+        };
+        document.addEventListener('keydown', handleKey);
+        art.on('destroy', () => document.removeEventListener('keydown', handleKey));
     }
 
-    // 处理后台标签页恢复
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && art && art.playing) {
-            // 标签页重新可见时，强制刷新缓冲区
             const video = art.video;
             if (video) {
                 const currentTime = video.currentTime;
-                video.currentTime = currentTime;  // 触发 seek 刷新缓冲区
+                video.currentTime = currentTime;
             }
         }
     });
@@ -1040,17 +1094,6 @@
         }
     }
 
-    // 黑底栏触发控制栏显示
-    (function() {
-        const ctrlBar = document.getElementById('video-ctrl-bar');
-        function triggerPlayerHover() {
-            const playerEl = document.querySelector('#player .art-video-player');
-            if (playerEl) playerEl.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
-        }
-        ctrlBar.addEventListener('mousemove', triggerPlayerHover);
-        ctrlBar.addEventListener('mouseenter', triggerPlayerHover);
-    })();
-
     window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl;
@@ -1098,6 +1141,10 @@
         if (autoUrl) { document.getElementById('url').value = autoUrl; window.go(); }
         setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
         refreshAllFollowStatus();
+        
+        // 启动时间更新
+        updateTimeDisplay();
+        timeInterval = setInterval(updateTimeDisplay, 1000);
     }
     init();
 </script>
