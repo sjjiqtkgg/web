@@ -27,18 +27,24 @@
         #player .art-video-player { overflow: visible !important; }
         #player .art-controls {
             bottom: -50px !important;
-            background: rgba(0,0,0,0.92) !important;
+            background: transparent !important;
             border-radius: 0 !important;
             height: 50px !important;
             display: flex !important;
             align-items: center !important;
+            /* 常驻显示，不随鼠标隐藏 */
+            opacity: 1 !important;
+            visibility: visible !important;
+            transform: none !important;
+            transition: none !important;
         }
-        /* 黑底栏：鼠标悬停或移动时控制栏就显示在这里 */
+        /* 黑底栏背景 */
         #video-ctrl-bar {
             height: 50px;
-            background: #000;
+            background: #111;
             flex-shrink: 0;
             cursor: default;
+            border-top: 1px solid #222;
         }
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
