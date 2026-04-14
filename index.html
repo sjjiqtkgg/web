@@ -21,16 +21,18 @@
         .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
         .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
         #main { flex: 1; display: flex; min-height: 0; }
-        #player-container { flex: 1; background: #000; position: relative; display: flex; flex-direction: column; }
-        /* 视频区域自适应，底部黑边固定高度 */
-        #player { flex: 1; width: 100%; background: #000; }
-        /* 底部黑边信息栏 */
-        #info-bar { height: 36px; background: #000; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; color: #eee; font-size: 14px; border-top: 1px solid #1a1a1a; flex-shrink: 0; }
-        #info-left { display: flex; align-items: center; gap: 16px; }
-        #info-line { font-weight: normal; }
-        #info-line.tencent { font-weight: bold; color: #f5a623; }
-        #info-volume { color: #aaa; }
-        #info-time { color: #aaa; }
+        #player-container { flex: 1; background: #000; position: relative; display: flex; align-items: center; justify-content: center; }
+        /* 新增：固定宽高比容器，制造上下黑边 */
+        .player-wrapper { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
+        .player-inner { width: 100%; max-width: calc(100vh * 16 / 9); aspect-ratio: 16 / 9; position: relative; background: #000; }
+        #player { width: 100%; height: 100%; }
+        /* 黑边信息层 - 默认隐藏，鼠标移动后显示 */
+        .video-overlay-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(to top, rgba(0,0,0,0.7), transparent); color: #fff; font-size: 14px; display: flex; justify-content: space-between; align-items: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 10; }
+        .player-inner:hover .video-overlay-info { opacity: 1; }
+        .info-left { display: flex; gap: 16px; }
+        .info-line { font-weight: normal; }
+        .info-line.tencent { font-weight: bold; color: #f5a623; }
+        .info-right { display: flex; gap: 16px; color: #ddd; }
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
         .chat-header span { color: #f5a623; font-weight: 500; }
@@ -55,9 +57,6 @@
         .follow-delete { color: #666; padding: 0 4px; font-size: 16px; }
         .follow-delete:hover { color: #f44336; }
         .history-time { font-size: 10px; color: #888; }
-        /* 隐藏 ArtPlayer 默认控制栏 */
-        .artplayer-controls { display: none !important; }
-        .artplayer-mask { display: none !important; }
         @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
     </style>
 </head>
@@ -73,15 +72,20 @@
 </div>
 <div id="main">
     <div id="player-container">
-        <div id="player"></div>
-        <div id="info-bar">
-            <div id="info-left">
-                <span id="info-line">—</span>
-            </div>
-            <div id="info-right">
-                <span id="info-volume">🔊 100%</span>
-                <span style="margin:0 8px;color:#444;">|</span>
-                <span id="info-time">00:00</span>
+        <!-- 新增包装层，实现16:9黑边效果 -->
+        <div class="player-wrapper">
+            <div class="player-inner">
+                <div id="player"></div>
+                <!-- 黑边信息层 -->
+                <div class="video-overlay-info" id="video-info">
+                    <div class="info-left">
+                        <span id="info-line">—</span>
+                    </div>
+                    <div class="info-right">
+                        <span id="info-volume">🔊 100%</span>
+                        <span id="info-time">00:00</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -839,7 +843,7 @@
         const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
         const qualityList = streams.length > 1 ? streams.map((s, i) => ({ default: i === 0, html: s.cdn, url: s.url, type: s.type || '' })) : [];
         
-        // 更新底部线路显示
+        // 更新底部信息显示
         updateLineDisplay(s0.cdn);
         updateVolumeDisplay(savedVolume, savedMuted);
 
@@ -851,7 +855,6 @@
             autoplay: true,
             muted: savedMuted,
             volume: savedVolume,
-            controls: false,  // 完全隐藏自带控件
             setting: false,
             pip: true,
             screenshot: false,
@@ -991,20 +994,6 @@
                 art.video._mpegts = null;
             }
         });
-
-        // 手动添加音量控制快捷键（↑/↓）
-        const handleKey = (e) => {
-            if (!art) return;
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                art.volume = Math.min(1, art.volume + 0.05);
-            } else if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                art.volume = Math.max(0, art.volume - 0.05);
-            }
-        };
-        document.addEventListener('keydown', handleKey);
-        art.on('destroy', () => document.removeEventListener('keydown', handleKey));
     }
 
     document.addEventListener('visibilitychange', () => {
