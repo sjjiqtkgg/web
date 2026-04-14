@@ -21,8 +21,57 @@
         .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
         .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
         #main { flex: 1; display: flex; min-height: 0; }
-        #player-container { flex: 1; background: #000; position: relative; }
-        #player { width: 100%; height: 100%; }
+        /* 播放器容器 - 改为 flex 居中，为 16:9 做铺垫 */
+        #player-container {
+            flex: 1;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .player-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .player-inner {
+            width: 100%;
+            max-width: calc(100vh * 16 / 9);
+            aspect-ratio: 16 / 9;
+            position: relative;
+            background: #000;
+        }
+        #player {
+            width: 100%;
+            height: 100%;
+        }
+        /* 黑边信息层 - 默认透明，悬停时显示 */
+        .video-overlay-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 16px;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            color: #fff;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .player-inner:hover .video-overlay-info {
+            opacity: 1;
+        }
+        .info-left { display: flex; gap: 16px; }
+        .info-line { font-weight: normal; }
+        .info-line.tencent { font-weight: bold; color: #f5a623; }
+        .info-right { display: flex; gap: 16px; color: #ddd; }
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
         .chat-header span { color: #f5a623; font-weight: 500; }
@@ -61,8 +110,23 @@
     <button class="bar-tab" data-tab="history">🕒 历史</button>
 </div>
 <div id="main">
+    <!-- 修改后的播放器容器结构 -->
     <div id="player-container">
-        <div id="player"></div>
+        <div class="player-wrapper">
+            <div class="player-inner">
+                <div id="player"></div>
+                <!-- 黑边信息层 -->
+                <div class="video-overlay-info" id="video-info">
+                    <div class="info-left">
+                        <span id="info-line">—</span>
+                    </div>
+                    <div class="info-right">
+                        <span id="info-volume">🔊 100%</span>
+                        <span id="info-time">00:00</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     <div id="chat-panel">
         <div class="chat-header">
@@ -210,12 +274,18 @@
     let sortable = null;
     const HISTORY_MAX = 30;
 
+    // ---------- 新增：信息显示元素 ----------
+    let timeInterval = null;
+    const infoLine = document.getElementById('info-line');
+    const infoVolume = document.getElementById('info-volume');
+    const infoTime = document.getElementById('info-time');
+
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
     function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
 
-    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
+    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'>':'&gt;'); }
     function logStatus(msg) { console.log('[状态]', msg); }
 
     function loadVolumeMemory() {
@@ -250,6 +320,30 @@
         if (url.includes('bilibili.com')) return 'B站';
         if (url.includes('douyin.com')) return '抖音';
         return '未知';
+    }
+
+    // 新增：更新时间显示
+    function updateTimeDisplay() {
+        const now = new Date();
+        const h = String(now.getHours()).padStart(2, '0');
+        const m = String(now.getMinutes()).padStart(2, '0');
+        infoTime.textContent = `${h}:${m}`;
+    }
+
+    // 新增：更新音量显示
+    function updateVolumeDisplay(volume, muted) {
+        const vol = muted ? 0 : Math.round(volume * 100);
+        infoVolume.textContent = `🔊 ${vol}%`;
+    }
+
+    // 新增：更新线路显示
+    function updateLineDisplay(cdnName) {
+        infoLine.textContent = cdnName || '—';
+        if (cdnName && cdnName.includes('腾讯')) {
+            infoLine.classList.add('tencent');
+        } else {
+            infoLine.classList.remove('tencent');
+        }
     }
 
     function addToHistory(url, name, platform, avatar) {
@@ -787,6 +881,11 @@
         const s0 = streams[0];
         const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
         const qualityList = streams.length > 1 ? streams.map((s, i) => ({ default: i === 0, html: s.cdn, url: s.url, type: s.type || '' })) : [];
+        
+        // 新增：更新底部信息显示
+        updateLineDisplay(s0.cdn);
+        updateVolumeDisplay(savedVolume, savedMuted);
+
         art = new Artplayer({
             container: '#player',
             url: s0.url,
@@ -914,11 +1013,17 @@
             }
         });
         art.on('video:volumechange', () => {
-            if (art) { savedVolume = art.volume; savedMuted = art.muted; saveVolumeMemory(); }
+            if (art) {
+                savedVolume = art.volume;
+                savedMuted = art.muted;
+                saveVolumeMemory();
+                updateVolumeDisplay(savedVolume, savedMuted); // 新增：更新音量显示
+            }
         });
         art.on('quality', (q) => {
             if (!q) return;
             logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
+            updateLineDisplay(q.html); // 新增：更新线路显示
             if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
             if (art?.video?._mpegts) {
                 try { art.video._mpegts.unload(); art.video._mpegts.detachMediaElement(); art.video._mpegts.destroy(); } catch(e){}
@@ -1063,6 +1168,10 @@
         if (autoUrl) { document.getElementById('url').value = autoUrl; window.go(); }
         setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
         refreshAllFollowStatus();
+
+        // 新增：启动时间更新
+        updateTimeDisplay();
+        timeInterval = setInterval(updateTimeDisplay, 1000);
     }
     init();
 </script>
