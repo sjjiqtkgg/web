@@ -21,14 +21,53 @@
         .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
         .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
         #main { flex: 1; display: flex; min-height: 0; }
-        #player-container { flex: 1; background: #000; position: relative; display: flex; align-items: center; justify-content: center; }
-        /* 新增：固定宽高比容器，制造上下黑边 */
-        .player-wrapper { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; }
-        .player-inner { width: 100%; max-width: calc(100vh * 16 / 9); aspect-ratio: 16 / 9; position: relative; background: #000; }
-        #player { width: 100%; height: 100%; }
-        /* 黑边信息层 - 默认隐藏，鼠标移动后显示 */
-        .video-overlay-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 8px 16px; background: linear-gradient(to top, rgba(0,0,0,0.7), transparent); color: #fff; font-size: 14px; display: flex; justify-content: space-between; align-items: center; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 10; }
-        .player-inner:hover .video-overlay-info { opacity: 1; }
+        /* 播放器容器 - 改为 flex 居中，为 16:9 做铺垫 */
+        #player-container {
+            flex: 1;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .player-wrapper {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .player-inner {
+            width: 100%;
+            max-width: calc(100vh * 16 / 9);
+            aspect-ratio: 16 / 9;
+            position: relative;
+            background: #000;
+        }
+        #player {
+            width: 100%;
+            height: 100%;
+        }
+        /* 黑边信息层 - 默认透明，悬停时显示 */
+        .video-overlay-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 16px;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            color: #fff;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .player-inner:hover .video-overlay-info {
+            opacity: 1;
+        }
         .info-left { display: flex; gap: 16px; }
         .info-line { font-weight: normal; }
         .info-line.tencent { font-weight: bold; color: #f5a623; }
@@ -71,8 +110,8 @@
     <button class="bar-tab" data-tab="history">🕒 历史</button>
 </div>
 <div id="main">
+    <!-- 修改后的播放器容器结构 -->
     <div id="player-container">
-        <!-- 新增包装层，实现16:9黑边效果 -->
         <div class="player-wrapper">
             <div class="player-inner">
                 <div id="player"></div>
@@ -234,9 +273,9 @@
     let historyListDiv = null;
     let sortable = null;
     const HISTORY_MAX = 30;
-    let timeInterval = null;
 
-    // UI 元素
+    // ---------- 新增：信息显示元素 ----------
+    let timeInterval = null;
     const infoLine = document.getElementById('info-line');
     const infoVolume = document.getElementById('info-volume');
     const infoTime = document.getElementById('info-time');
@@ -283,7 +322,7 @@
         return '未知';
     }
 
-    // 更新时间显示
+    // 新增：更新时间显示
     function updateTimeDisplay() {
         const now = new Date();
         const h = String(now.getHours()).padStart(2, '0');
@@ -291,13 +330,13 @@
         infoTime.textContent = `${h}:${m}`;
     }
 
-    // 更新音量显示
+    // 新增：更新音量显示
     function updateVolumeDisplay(volume, muted) {
         const vol = muted ? 0 : Math.round(volume * 100);
         infoVolume.textContent = `🔊 ${vol}%`;
     }
 
-    // 更新线路显示
+    // 新增：更新线路显示
     function updateLineDisplay(cdnName) {
         infoLine.textContent = cdnName || '—';
         if (cdnName && cdnName.includes('腾讯')) {
@@ -843,7 +882,7 @@
         const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
         const qualityList = streams.length > 1 ? streams.map((s, i) => ({ default: i === 0, html: s.cdn, url: s.url, type: s.type || '' })) : [];
         
-        // 更新底部信息显示
+        // 新增：更新底部信息显示
         updateLineDisplay(s0.cdn);
         updateVolumeDisplay(savedVolume, savedMuted);
 
@@ -853,7 +892,7 @@
             type: artType,
             isLive: true,
             autoplay: true,
-            muted: savedMuted,
+            muted: savedMuted,      // 默认 true，确保自动播放
             volume: savedVolume,
             setting: false,
             pip: true,
@@ -872,14 +911,14 @@
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
                         enableStashBuffer: false,
-                        stashInitialSize: 128,
+                        stashInitialSize: 128,        // 与 lemon-live 一致
                         liveBufferLatencyChasing: true,
                         liveBufferLatencyMaxLatency: 5.0,
                         liveBufferLatencyMinRemain: 0.7,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 14,
                         autoCleanupMinBackwardDuration: 6,
-                        lazyLoad: true,
+                        lazyLoad: true,               // 新增：懒加载
                         lazyLoadMaxDuration: 3 * 60,
                         lazyLoadRecoverDuration: 30,
                         reconnectInterval: 5,
@@ -957,7 +996,6 @@
                 }
             }
         });
-
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
@@ -974,20 +1012,18 @@
                 startDouyinDanmaku(roomId);
             }
         });
-
         art.on('video:volumechange', () => {
             if (art) {
                 savedVolume = art.volume;
                 savedMuted = art.muted;
                 saveVolumeMemory();
-                updateVolumeDisplay(savedVolume, savedMuted);
+                updateVolumeDisplay(savedVolume, savedMuted); // 新增：更新音量显示
             }
         });
-
         art.on('quality', (q) => {
             if (!q) return;
             logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
-            updateLineDisplay(q.html);
+            updateLineDisplay(q.html); // 新增：更新线路显示
             if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
             if (art?.video?._mpegts) {
                 try { art.video._mpegts.unload(); art.video._mpegts.detachMediaElement(); art.video._mpegts.destroy(); } catch(e){}
@@ -996,12 +1032,14 @@
         });
     }
 
+    // 处理后台标签页恢复
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && art && art.playing) {
+            // 标签页重新可见时，强制刷新缓冲区
             const video = art.video;
             if (video) {
                 const currentTime = video.currentTime;
-                video.currentTime = currentTime;
+                video.currentTime = currentTime;  // 触发 seek 刷新缓冲区
             }
         }
     });
@@ -1130,8 +1168,8 @@
         if (autoUrl) { document.getElementById('url').value = autoUrl; window.go(); }
         setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
         refreshAllFollowStatus();
-        
-        // 启动时间更新
+
+        // 新增：启动时间更新
         updateTimeDisplay();
         timeInterval = setInterval(updateTimeDisplay, 1000);
     }
