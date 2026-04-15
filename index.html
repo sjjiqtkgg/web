@@ -343,6 +343,7 @@
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
+    // ==================== 刷新关注状态（修复斗鱼误判） ====================
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
@@ -351,11 +352,26 @@
             try {
                 const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}`);
                 const d = await r.json();
-                if (d.error) item.status = 'error';
-                else if (d.streams && d.streams.length) item.status = 'online';
-                else item.status = 'offline';
-                if (d.avatar && !item.avatar) item.avatar = d.avatar;
-            } catch(e) { item.status = 'error'; }
+                if (d.error) {
+                    item.status = 'error';
+                } else if (d.client) {
+                    // 斗鱼专用：直接使用后端返回的 isLive 状态（准确区分直播和轮播）
+                    if (item.url.includes('douyu.com')) {
+                        item.status = d.isLive ? 'online' : 'offline';
+                        if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                    } else {
+                        // 其他平台的 client 模式（暂时没有）
+                        item.status = 'offline';
+                    }
+                } else if (d.streams && d.streams.length) {
+                    item.status = 'online';
+                    if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                } else {
+                    item.status = 'offline';
+                }
+            } catch(e) {
+                item.status = 'error';
+            }
             await new Promise(r => setTimeout(r, 500));
         }
         _saveFollows(items);
