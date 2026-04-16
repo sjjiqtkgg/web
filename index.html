@@ -271,7 +271,6 @@
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
-        // 不再直接绑定事件，由全局委托处理
     }
 
     function formatTime(timestamp) {
@@ -315,7 +314,6 @@
             _saveFollows(newItems);
             renderFollowList();
         } });
-        // 不再直接绑定事件，由全局委托处理
     }
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
@@ -1050,7 +1048,27 @@
         initTabs();
         initDanmakuSwitch();
 
-        // ========== 关注列表事件委托（左键播放、中键新标签、删除） ==========
+        // ========== 关注列表事件委托（使用 mousedown 检测中键，更可靠） ==========
+        followListDiv.addEventListener('mousedown', (e) => {
+            const item = e.target.closest('.follow-item');
+            if (!item || !item.dataset.url) return;
+            
+            if (e.button === 1) { // 中键
+                e.preventDefault();
+                e.stopPropagation();
+                const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
+                console.log('[中键] 关注列表打开新标签:', newUrl);
+                window.open(newUrl, '_blank');
+                return;
+            }
+            
+            if (e.button === 0) { // 左键
+                // 但注意：这里可能和 click 事件冲突，但 Sortable 会处理拖动，左键我们交给 click 事件处理
+                // 为了避免重复，这里不处理左键
+            }
+        });
+
+        // 左键播放（使用 click 事件，防止与 Sortable 拖动冲突）
         followListDiv.addEventListener('click', (e) => {
             const del = e.target.closest('[data-del]');
             if (del) {
@@ -1068,27 +1086,25 @@
             }
         });
 
-        followListDiv.addEventListener('auxclick', (e) => {
-            const item = e.target.closest('.follow-item');
-            if (item && item.dataset.url && e.button === 1) {
+        // ========== 历史记录事件委托（同样使用 mousedown 检测中键） ==========
+        historyListDiv.addEventListener('mousedown', (e) => {
+            const item = e.target.closest('.history-item');
+            if (!item || !item.dataset.url) return;
+            
+            if (e.button === 1) {
                 e.preventDefault();
-                window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
+                e.stopPropagation();
+                const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
+                console.log('[中键] 历史列表打开新标签:', newUrl);
+                window.open(newUrl, '_blank');
+                return;
             }
         });
 
-        // ========== 历史记录事件委托（左键播放、中键新标签） ==========
         historyListDiv.addEventListener('click', (e) => {
             const item = e.target.closest('.history-item');
             if (item && item.dataset.url) {
                 playFromHistory(item.dataset.url);
-            }
-        });
-
-        historyListDiv.addEventListener('auxclick', (e) => {
-            const item = e.target.closest('.history-item');
-            if (item && item.dataset.url && e.button === 1) {
-                e.preventDefault();
-                window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
             }
         });
 
