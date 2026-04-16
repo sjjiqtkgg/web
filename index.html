@@ -271,6 +271,7 @@
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
+        // 不再直接绑定事件，由全局委托处理
     }
 
     function formatTime(timestamp) {
@@ -314,6 +315,7 @@
             _saveFollows(newItems);
             renderFollowList();
         } });
+        // 不再直接绑定事件，由全局委托处理
     }
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
@@ -1048,7 +1050,7 @@
         initTabs();
         initDanmakuSwitch();
 
-        // 关注列表事件委托（左键播放，中键新标签，删除按钮）
+        // ========== 关注列表事件委托（左键播放、中键新标签、删除） ==========
         followListDiv.addEventListener('click', (e) => {
             const del = e.target.closest('[data-del]');
             if (del) {
@@ -1074,7 +1076,7 @@
             }
         });
 
-        // 历史记录事件委托（左键播放，中键新标签）
+        // ========== 历史记录事件委托（左键播放、中键新标签） ==========
         historyListDiv.addEventListener('click', (e) => {
             const item = e.target.closest('.history-item');
             if (item && item.dataset.url) {
