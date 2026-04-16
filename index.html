@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-cxe9.onrender.com';   // 如果本地穿透，改为你的隧道地址
+    const API_BASE = 'https://live1-cxe9.onrender.com';
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -193,7 +193,7 @@
     let art = null;
     let lastRoomUrl = '';
     let savedVolume = 0.5;
-    let savedMuted = true;   // 默认静音，确保自动播放
+    let savedMuted = true;
     let currentAnchorName = '';
     let currentPlatform = '';
     let currentAvatar = '';
@@ -271,9 +271,6 @@
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
-        historyListDiv.querySelectorAll('.history-item').forEach(el => {
-            el.addEventListener('click', () => { playFromHistory(el.dataset.url); });
-        });
     }
 
     function formatTime(timestamp) {
@@ -317,28 +314,6 @@
             _saveFollows(newItems);
             renderFollowList();
         } });
-        followListDiv.onclick = (e) => {
-            const del = e.target.closest('[data-del]');
-            if (del) {
-                const idx = parseInt(del.dataset.del);
-                const arr = _loadFollows();
-                arr.splice(idx, 1);
-                _saveFollows(arr);
-                renderFollowList();
-                updateFollowBtn(lastRoomUrl);
-                return;
-            }
-            const item = e.target.closest('.follow-item');
-            if (item && item.dataset.url) playFromFollows(item.dataset.url);
-        };
-        followListDiv.querySelectorAll('.follow-item').forEach(el => {
-            el.addEventListener('auxclick', (e) => {
-                if (e.button === 1 && el.dataset.url) {
-                    e.preventDefault();
-                    window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(el.dataset.url), '_blank');
-                }
-            });
-        });
     }
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
@@ -350,7 +325,6 @@
             const item = items[i];
             try {
                 const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}`);
-                // 静默处理 400 错误（通常是未开播）
                 if (r.status === 400) {
                     item.status = 'offline';
                     continue;
@@ -363,7 +337,6 @@
                 if (d.error) {
                     item.status = 'error';
                 } else if (d.client) {
-                    // 斗鱼专用：直接使用后端返回的 isLive 状态
                     if (item.url.includes('douyu.com')) {
                         item.status = d.isLive ? 'online' : 'offline';
                         if (d.avatar && !item.avatar) item.avatar = d.avatar;
@@ -743,7 +716,6 @@
         return url;
     }
 
-    // 播放器核心
     async function goWithUrl(raw) {
         if (!raw) return;
         setBtn(true);
@@ -816,7 +788,7 @@
             type: artType,
             isLive: true,
             autoplay: true,
-            muted: savedMuted,      // 默认 true，确保自动播放
+            muted: savedMuted,
             volume: savedVolume,
             setting: false,
             pip: true,
@@ -1075,6 +1047,49 @@
         loadVolumeMemory();
         initTabs();
         initDanmakuSwitch();
+
+        // 关注列表事件委托（左键播放，中键新标签，删除按钮）
+        followListDiv.addEventListener('click', (e) => {
+            const del = e.target.closest('[data-del]');
+            if (del) {
+                const idx = parseInt(del.dataset.del);
+                const arr = _loadFollows();
+                arr.splice(idx, 1);
+                _saveFollows(arr);
+                renderFollowList();
+                updateFollowBtn(lastRoomUrl);
+                return;
+            }
+            const item = e.target.closest('.follow-item');
+            if (item && item.dataset.url) {
+                playFromFollows(item.dataset.url);
+            }
+        });
+
+        followListDiv.addEventListener('auxclick', (e) => {
+            const item = e.target.closest('.follow-item');
+            if (item && item.dataset.url && e.button === 1) {
+                e.preventDefault();
+                window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
+            }
+        });
+
+        // 历史记录事件委托（左键播放，中键新标签）
+        historyListDiv.addEventListener('click', (e) => {
+            const item = e.target.closest('.history-item');
+            if (item && item.dataset.url) {
+                playFromHistory(item.dataset.url);
+            }
+        });
+
+        historyListDiv.addEventListener('auxclick', (e) => {
+            const item = e.target.closest('.history-item');
+            if (item && item.dataset.url && e.button === 1) {
+                e.preventDefault();
+                window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
+            }
+        });
+
         renderFollowList();
         renderHistoryList();
         const urlInput = document.getElementById('url');
