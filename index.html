@@ -1048,31 +1048,20 @@
         initTabs();
         initDanmakuSwitch();
 
-        // 标志位：防止中键触发 click 后的播放跳转
-        let middleButtonHandled = false;
-
-        // 关注列表：中键新标签，左键播放，删除
-        followListDiv.addEventListener('mousedown', (e) => {
+        // ----- 关注列表：中键新标签，左键播放，删除 -----
+        followListDiv.addEventListener('auxclick', (e) => {
+            if (e.button !== 1) return;
             const item = e.target.closest('.follow-item');
             if (!item || !item.dataset.url) return;
-            if (e.button === 1) {
-                e.preventDefault();
-                e.stopPropagation();
-                middleButtonHandled = true;
-                const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
-                console.log('[中键] 关注列表打开新标签:', newUrl);
-                window.open(newUrl, '_blank');
-                setTimeout(() => { middleButtonHandled = false; }, 100);
-            } else {
-                middleButtonHandled = false;
-            }
+            e.preventDefault();
+            e.stopPropagation();
+            const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
+            console.log('[中键] 关注列表打开新标签:', newUrl);
+            window.open(newUrl, '_blank');
         }, true);
 
         followListDiv.addEventListener('click', (e) => {
-            if (middleButtonHandled) {
-                middleButtonHandled = false;
-                return;
-            }
+            if (e.button !== 0) return;
             const del = e.target.closest('[data-del]');
             if (del) {
                 const idx = parseInt(del.dataset.del);
@@ -1089,31 +1078,35 @@
             }
         });
 
-        // 历史列表：中键新标签，左键播放
-        historyListDiv.addEventListener('mousedown', (e) => {
-            const item = e.target.closest('.history-item');
-            if (!item || !item.dataset.url) return;
+        followListDiv.addEventListener('mousedown', (e) => {
             if (e.button === 1) {
                 e.preventDefault();
-                e.stopPropagation();
-                middleButtonHandled = true;
-                const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
-                console.log('[中键] 历史列表打开新标签:', newUrl);
-                window.open(newUrl, '_blank');
-                setTimeout(() => { middleButtonHandled = false; }, 100);
-            } else {
-                middleButtonHandled = false;
             }
+        });
+
+        // ----- 历史列表：中键新标签，左键播放 -----
+        historyListDiv.addEventListener('auxclick', (e) => {
+            if (e.button !== 1) return;
+            const item = e.target.closest('.history-item');
+            if (!item || !item.dataset.url) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const newUrl = window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url);
+            console.log('[中键] 历史列表打开新标签:', newUrl);
+            window.open(newUrl, '_blank');
         }, true);
 
         historyListDiv.addEventListener('click', (e) => {
-            if (middleButtonHandled) {
-                middleButtonHandled = false;
-                return;
-            }
+            if (e.button !== 0) return;
             const item = e.target.closest('.history-item');
             if (item && item.dataset.url) {
                 playFromHistory(item.dataset.url);
+            }
+        });
+
+        historyListDiv.addEventListener('mousedown', (e) => {
+            if (e.button === 1) {
+                e.preventDefault();
             }
         });
 
