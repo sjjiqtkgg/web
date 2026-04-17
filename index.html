@@ -639,53 +639,58 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
-    // ==================== 抖音弹幕（通过后端 WebSocket 中继） ====================
-    function startDouyinDanmaku(roomId) {
-        if (!danmakuEnabled || !roomId) return;
-        if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+function startDouyinDanmaku(roomId) {
+    if (!danmakuEnabled || !roomId) return;
+    if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
 
-        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
-        const ws = new WebSocket(wsUrl);
-        douyinWs = ws;
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
+    const ws = new WebSocket(wsUrl);
+    douyinWs = ws;
 
-        ws.onopen = () => {
-            console.log('[抖音弹幕] 已连接房间', roomId);
-            const heartbeat = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send('ping');
-                } else {
-                    clearInterval(heartbeat);
-                }
-            }, 30000);
-        };
-
-        ws.onmessage = (event) => {
-            if (event.data === 'pong') return;
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.type === 'chat' && msg.nick && msg.content) {
-                    addChatMessage(msg.nick, msg.content);
-                } else if (msg.type === 'gift') {
-                    addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
-                } else if (msg.type === 'like') {
-                    addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
-                }
-            } catch(e) {
-                console.error('[抖音弹幕] 解析错误', e, event.data);
+    ws.onopen = () => {
+        console.log('[抖音弹幕] 已连接房间', roomId);
+        // 测试渲染链路
+        addChatMessage('系统', '弹幕连接成功！');
+        const heartbeat = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('ping');
+            } else {
+                clearInterval(heartbeat);
             }
-        };
+        }, 30000);
+    };
 
-        ws.onclose = () => {
-            console.log('[抖音弹幕] 连接断开');
-            if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                setTimeout(() => startDouyinDanmaku(roomId), 3000);
+    ws.onmessage = (event) => {
+        if (event.data === 'pong') return;
+        console.log('[抖音弹幕] 收到原始消息:', event.data);
+        try {
+            const msg = JSON.parse(event.data);
+            console.log('[抖音弹幕] 解析后消息:', msg);
+            if (msg.type === 'chat' && msg.nick && msg.content) {
+                addChatMessage(msg.nick, msg.content);
+            } else if (msg.type === 'gift') {
+                addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
+            } else if (msg.type === 'like') {
+                addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
+            } else {
+                console.warn('[抖音弹幕] 未知消息类型:', msg.type);
             }
-        };
+        } catch(e) {
+            console.error('[抖音弹幕] 解析错误', e, event.data);
+        }
+    };
 
-        ws.onerror = (e) => {
-            console.error('[抖音弹幕] 错误', e);
-        };
-    }
+    ws.onclose = () => {
+        console.log('[抖音弹幕] 连接断开');
+        if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+            setTimeout(() => startDouyinDanmaku(roomId), 3000);
+        }
+    };
+
+    ws.onerror = (e) => {
+        console.error('[抖音弹幕] 错误', e);
+    };
+}
 
     function addChatMessage(nick, text) {
         if (!danmakuEnabled || currentTab !== 'danmaku') return;
