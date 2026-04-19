@@ -21,7 +21,8 @@
         .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
         .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
         #main { flex: 1; display: flex; min-height: 0; }
-        /* 播放器容器：使用 flex 居中，留出上下黑边 */
+
+        /* 播放器容器：居中显示 */
         #player-container {
             flex: 1;
             background: #000;
@@ -30,18 +31,28 @@
             align-items: center;
             justify-content: center;
         }
-        /* 播放器本体：固定 16:9 比例，不超出容器 */
+        /* 播放器盒子：16:9 比例 */
         #player {
             width: 100%;
             max-width: 100%;
             max-height: 100%;
             aspect-ratio: 16 / 9;
         }
-        /* 确保 ArtPlayer 内部也填满 */
+        /* 🔥 关键修复：强制 ArtPlayer 内部的视频画面保持比例，不拉伸，上下出现黑边 */
+        .artplayer-video video,
+        .art-video video,
+        .artplayer video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: contain !important;
+            background: #000;
+        }
+        /* 确保 ArtPlayer 根容器填满 #player */
         .artplayer {
             width: 100% !important;
             height: 100% !important;
         }
+
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
         .chat-header span { color: #f5a623; font-weight: 500; }
