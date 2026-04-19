@@ -8,66 +8,47 @@
     <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-<style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
-    #bar { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 48px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
-    #url { flex: 1; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 8px 12px; color: #eee; font-size: 14px; outline: none; }
-    #url:focus { border-color: #f5a623; }
-    button { background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 6px 14px; color: #ddd; font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
-    button:hover { background: #3a3a3a; border-color: #f5a623; color: #f5a623; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .fav-on { color: #f5a623 !important; border-color: #f5a623 !important; }
-    .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
-    .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
-    #main { flex: 1; display: flex; min-height: 0; }
-    /* 播放器容器：使用 flex 居中，留出上下黑边 */
-    #player-container {
-        flex: 1;
-        background: #000;
-        position: relative;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    /* 播放器本体：固定 16:9 比例，不超出容器 */
-    #player {
-        width: 100%;
-        max-width: 100%;
-        max-height: 100%;
-        aspect-ratio: 16 / 9;
-    }
-    /* 确保 ArtPlayer 内部也填满 */
-    .artplayer {
-        width: 100% !important;
-        height: 100% !important;
-    }
-    #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
-    .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
-    .chat-header span { color: #f5a623; font-weight: 500; }
-    .danmaku-switch { display: flex; align-items: center; gap: 8px; }
-    .switch-icon { font-size: 18px; cursor: pointer; padding: 4px; border-radius: 4px; }
-    .switch-icon:hover { background: #2a2a2a; }
-    .chat-content { flex: 1; overflow-y: auto; padding: 8px; }
-    .chat-messages { display: flex; flex-direction: column; gap: 6px; }
-    .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
-    .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
-    .chat-text { color: #ddd; word-break: break-word; }
-    .empty-chat { text-align: center; color: #555; padding: 20px; font-style: italic; }
-    .follow-list, .history-list { display: flex; flex-direction: column; gap: 6px; }
-    .follow-item, .history-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; background: #141414; transition: background 0.2s; }
-    .follow-item:hover, .history-item:hover { background: #222; }
-    .follow-avatar, .history-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2a2a2a; object-fit: cover; flex-shrink: 0; }
-    .follow-info, .history-info { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .follow-status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: #222; }
-    .follow-status.online { color: #8bc34a; }
-    .follow-status.offline { color: #f44336; }
-    .follow-delete { color: #666; padding: 0 4px; font-size: 16px; }
-    .follow-delete:hover { color: #f44336; }
-    .history-time { font-size: 10px; color: #888; }
-    @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
-</style>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        #bar { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 48px; background: #0a0a0a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+        #url { flex: 1; background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 8px 12px; color: #eee; font-size: 14px; outline: none; }
+        #url:focus { border-color: #f5a623; }
+        button { background: #2a2a2a; border: 1px solid #444; border-radius: 6px; padding: 6px 14px; color: #ddd; font-size: 13px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+        button:hover { background: #3a3a3a; border-color: #f5a623; color: #f5a623; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .fav-on { color: #f5a623 !important; border-color: #f5a623 !important; }
+        .bar-tab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; padding: 0 12px; height: 48px; line-height: 48px; font-size: 14px; }
+        .bar-tab.active { color: #f5a623; border-bottom-color: #f5a623; }
+        #main { flex: 1; display: flex; min-height: 0; }
+        #player-container { flex: 1; background: #000; display: flex; align-items: center; justify-content: center; min-height: 0; }
+        #player { background: #000; }
+        #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
+        .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
+        .chat-header span { color: #f5a623; font-weight: 500; }
+        .danmaku-switch { display: flex; align-items: center; gap: 8px; }
+        .switch-icon { font-size: 18px; cursor: pointer; padding: 4px; border-radius: 4px; }
+        .switch-icon:hover { background: #2a2a2a; }
+        .chat-content { flex: 1; overflow-y: auto; padding: 8px; }
+        .chat-messages { display: flex; flex-direction: column; gap: 6px; }
+        .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
+        .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
+        .chat-text { color: #ddd; word-break: break-word; }
+        .empty-chat { text-align: center; color: #555; padding: 20px; font-style: italic; }
+        .follow-list, .history-list { display: flex; flex-direction: column; gap: 6px; }
+        .follow-item, .history-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; background: #141414; transition: background 0.2s; }
+        .follow-item:hover, .history-item:hover { background: #222; }
+        .follow-avatar, .history-avatar { width: 32px; height: 32px; border-radius: 50%; background: #2a2a2a; object-fit: cover; flex-shrink: 0; }
+        .follow-info, .history-info { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .follow-status { font-size: 11px; padding: 2px 6px; border-radius: 10px; background: #222; }
+        .follow-status.online { color: #8bc34a; }
+        .follow-status.offline { color: #f44336; }
+        .follow-delete { color: #666; padding: 0 4px; font-size: 16px; }
+        .follow-delete:hover { color: #f44336; }
+        .history-time { font-size: 10px; color: #888; }
+        @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
+    </style>
 </head>
 <body>
 <div id="bar">
@@ -81,9 +62,7 @@
 </div>
 <div id="main">
     <div id="player-container">
-        <div id="player-wrap">
-            <div id="player"></div>
-        </div>
+        <div id="player"></div>
     </div>
     <div id="chat-panel">
         <div class="chat-header">
@@ -918,25 +897,25 @@ function startDouyinDanmaku(roomId) {
                 }
             }
         });
-        function adjustPlayerRatio() {
-            const container = document.getElementById('player-container');
-            const wrap = document.getElementById('player-wrap');
-            if (!container || !wrap) return;
-            const cw = container.clientWidth;
-            const ch = container.clientHeight;
+        function fitPlayer16x9() {
+            if (!art) return;
+            const c = document.getElementById('player-container');
+            if (!c) return;
+            const cw = c.clientWidth;
+            const ch = c.clientHeight;
+            let w, h;
             if (cw / ch > 16 / 9) {
-                wrap.style.width = Math.floor(ch * 16 / 9) + 'px';
-                wrap.style.height = ch + 'px';
+                h = ch; w = Math.floor(ch * 16 / 9);
             } else {
-                wrap.style.width = cw + 'px';
-                wrap.style.height = Math.floor(cw * 9 / 16) + 'px';
+                w = cw; h = Math.floor(cw * 9 / 16);
             }
+            art.width = w;
+            art.height = h;
         }
-        window.addEventListener('resize', adjustPlayerRatio);
-        adjustPlayerRatio();
+        window.addEventListener('resize', fitPlayer16x9);
 
         art.on('ready', () => {
-            adjustPlayerRatio();
+            fitPlayer16x9();
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
