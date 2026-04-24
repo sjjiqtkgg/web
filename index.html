@@ -291,6 +291,7 @@
         btn.title = isFollow ? '取消关注' : '关注';
     }
 
+    // 注意：renderFollowList 中不再手动绑定 click/auxclick，改为事件委托
     function renderFollowList() {
         if (!followListDiv) return;
         const items = _loadFollows();
@@ -725,6 +726,11 @@ function startDouyinDanmaku(roomId) {
         if (!raw) return;
         setBtn(true);
         logStatus('处理中…');
+
+        // 切换直播间时立即清空旧弹幕列表
+        currentChatList = [];
+        renderChatMessages();
+
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
         lastRoomUrl = isCDN ? '' : raw;
         currentPlatform = getPlatformName(raw);
