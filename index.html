@@ -89,6 +89,26 @@
     // ======================= 配置区域 =======================
     const API_BASE = 'https://live1-cxe9.onrender.com';
 
+    // ========== 头像工具函数 ==========
+    function normalizeAvatar(av) {
+        if (!av) return '';
+        if (typeof av === 'string') return av;
+        return av.big || av.middle || av.small || '';
+    }
+
+    function getRefererFromUrl(url) {
+        if (!url) return '';
+        if (url.includes('huya.com') || url.includes('huyaimg.com'))
+            return 'https://www.huya.com/';
+        if (url.includes('douyu.com'))
+            return 'https://www.douyu.com/';
+        if (url.includes('bilibili.com') || url.includes('bilivideo.com'))
+            return 'https://live.bilibili.com/';
+        if (url.includes('douyinpic.com') || url.includes('douyin.com'))
+            return 'https://live.douyin.com/';
+        return '';
+    }
+
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
       function sa(x,y){var l=(x&0xFFFF)+(y&0xFFFF);return(((x>>16)+(y>>16)+(l>>16))<<16)|(l&0xFFFF)}
@@ -267,8 +287,14 @@
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         let html = '';
         items.forEach(item => {
-            const _havUrl = item.avatar ? `${API_BASE}/api/proxy?url=${encodeURIComponent(item.avatar)}&referer=${encodeURIComponent('https://www.huya.com/')}` : '';
-            let avatarHtml = _havUrl ? `<img class="history-avatar" src="${_havUrl}" onerror="this.style.display='none'" alt="">` : '<div class="history-avatar"></div>';
+            const rawAvatar = normalizeAvatar(item.avatar);
+            const referer = getRefererFromUrl(rawAvatar);
+            const avatarUrl = rawAvatar
+                ? `${API_BASE}/api/proxy?url=${encodeURIComponent(rawAvatar)}&referer=${encodeURIComponent(referer)}`
+                : '';
+            const avatarHtml = avatarUrl
+                ? `<img class="history-avatar" src="${avatarUrl}" onerror="this.style.display='none'">`
+                : '<div class="history-avatar"></div>';
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
@@ -292,7 +318,6 @@
         btn.title = isFollow ? '取消关注' : '关注';
     }
 
-    // 注意：renderFollowList 中不再手动绑定 click/auxclick，改为事件委托
     function renderFollowList() {
         if (!followListDiv) return;
         const items = _loadFollows();
@@ -305,8 +330,14 @@
         let html = '';
         items.forEach((x, i) => {
             const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const _favUrl = x.avatar ? `${API_BASE}/api/proxy?url=${encodeURIComponent(x.avatar)}&referer=${encodeURIComponent('https://www.huya.com/')}` : '';
-            const avatarHtml = _favUrl ? `<img class="follow-avatar" src="${_favUrl}" onerror="this.style.display='none'" alt="">` : '<div class="follow-avatar"></div>';
+            const rawAvatar = normalizeAvatar(x.avatar);
+            const referer = getRefererFromUrl(rawAvatar);
+            const avatarUrl = rawAvatar
+                ? `${API_BASE}/api/proxy?url=${encodeURIComponent(rawAvatar)}&referer=${encodeURIComponent(referer)}`
+                : '';
+            const avatarHtml = avatarUrl
+                ? `<img class="follow-avatar" src="${avatarUrl}" onerror="this.style.display='none'">`
+                : '<div class="follow-avatar"></div>';
             html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
         });
         followListDiv.innerHTML = html;
@@ -330,27 +361,37 @@
                 const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}`);
                 if (r.status === 400) {
                     item.status = 'offline';
-                    continue;
                 }
-                if (!r.ok) {
-                    item.status = 'error';
-                    continue;
-                }
-                const d = await r.json();
-                if (d.error) {
-                    item.status = 'error';
-                } else if (d.client) {
-                    if (item.url.includes('douyu.com')) {
-                        item.status = d.isLive ? 'online' : 'offline';
-                        if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                if (r.ok) {
+                    const d = await r.json();
+                    if (d.error) {
+                        item.status = 'error';
+                    } else if (d.client) {
+                        if (item.url.includes('douyu.com')) {
+                            item.status = d.isLive ? 'online' : 'offline';
+                            if (d.avatar) item.avatar = d.avatar;
+                        } else {
+                            item.status = 'offline';
+                        }
+                    } else if (d.streams && d.streams.length) {
+                        item.status = 'online';
+                        if (d.avatar) item.avatar = d.avatar;
                     } else {
                         item.status = 'offline';
                     }
-                } else if (d.streams && d.streams.length) {
-                    item.status = 'online';
-                    if (d.avatar && !item.avatar) item.avatar = d.avatar;
-                } else {
-                    item.status = 'offline';
+                }
+
+                // 额外：虎牙主播尝试获取专用信息
+                if (item.url.includes('huya.com')) {
+                    const roomId = item.url.split('/').pop().split('?')[0];
+                    try {
+                        const infoResp = await fetch(`${API_BASE}/api/huya/info?room_id=${roomId}`);
+                        if (infoResp.ok) {
+                            const info = await infoResp.json();
+                            if (info.avatar) item.avatar = info.avatar;
+                            if (info.title) item.name = info.title;
+                        }
+                    } catch(e) {}
                 }
             } catch(e) {
                 item.status = 'error';
@@ -729,7 +770,6 @@
         if (!raw) return;
         setBtn(true);
         logStatus('处理中…');
-        // 清空旧弹幕
         currentChatList = [];
         renderChatMessages();
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
@@ -777,7 +817,7 @@
             currentPlatform = '直链';
             dmConfig = null;
         } else {
-            logStatus('❌ 不支持的链接，请提供直播间地址或直链');
+            logStatus('❌ 不支持的链接');
             setBtn(false);
             return;
         }
@@ -790,7 +830,6 @@
     function playStream(streams) {
         if (art) {
             try {
-                // 清理旧定时器
                 if (art.video && art.video._stallTimer) {
                     clearInterval(art.video._stallTimer);
                     art.video._stallTimer = null;
@@ -822,7 +861,6 @@
             quality: qualityList,
             customType: {
                 flv: function(video, url) {
-                    // 清理可能残留的旧实例
                     if (video._mpegts) {
                         try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){}
                         video._mpegts = null;
@@ -848,7 +886,6 @@
                     video._mpegts = player;
 
                     let lastTime = -1, stallCount = 0;
-                    // 清理旧定时器（如果有）
                     if (video._stallTimer) {
                         clearInterval(video._stallTimer);
                     }
@@ -871,7 +908,7 @@
                         } else { stallCount = 0; }
                         lastTime = ct;
                     }, 2500);
-                    video._stallTimer = stallTimer;  // 挂到 video 上，便于清理
+                    video._stallTimer = stallTimer;
 
                     video.addEventListener('ended', function onFlvEnded() {
                         if (!lastRoomUrl) return;
@@ -887,7 +924,7 @@
                             const curQ = art.quality;
                             const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
                             if (nxt) art.switchQuality(nxt);
-                            else setTimeout(() => goWithUrl(lastRoomUrl), 5000); // 延长到5秒
+                            else setTimeout(() => goWithUrl(lastRoomUrl), 5000);
                         }
                     });
                 },
