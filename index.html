@@ -340,13 +340,13 @@
                 } else if (d.client) {
                     if (item.url.includes('douyu.com')) {
                         item.status = d.isLive ? 'online' : 'offline';
-                        if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                        if (d.avatar) item.avatar = d.avatar;
                     } else {
                         item.status = 'offline';
                     }
                 } else if (d.streams && d.streams.length) {
                     item.status = 'online';
-                    if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                    if (d.avatar) item.avatar = d.avatar;
                 } else {
                     item.status = 'offline';
                 }
@@ -811,7 +811,6 @@ function startDouyinDanmaku(roomId) {
             quality: qualityList,
             customType: {
                 flv: function(video, url) {
-                    if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
                     if (video._mpegts) {
                         try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){}
                         video._mpegts = null;
@@ -821,14 +820,16 @@ function startDouyinDanmaku(roomId) {
                         enableStashBuffer: false,
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 5.0,
+                        liveBufferLatencyMaxLatency: 4.0,
                         liveBufferLatencyMinRemain: 0.5,
                         autoCleanupSourceBuffer: true,
                         autoCleanupMaxBackwardDuration: 10,
                         autoCleanupMinBackwardDuration: 5,
-                        lazyLoad: false,
-                        reconnectInterval: 3,
-                        reconnectAttempts: 2,
+                        lazyLoad: true,
+                        lazyLoadMaxDuration: 3 * 60,
+                        lazyLoadRecoverDuration: 30,
+                        reconnectInterval: 5,
+                        reconnectAttempts: 3,
                         fixAudioTimestampGap: false
                     });
                     player.attachMediaElement(video);
@@ -836,13 +837,13 @@ function startDouyinDanmaku(roomId) {
                     video._mpegts = player;
 
                     let lastTime = -1, stallCount = 0;
-                    video._stallTimer = setInterval(() => {
-                        if (!art || !video) { clearInterval(video._stallTimer); video._stallTimer = null; return; }
+                    const stallTimer = setInterval(() => {
+                        if (!art || !video) { clearInterval(stallTimer); return; }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
                             if (stallCount >= 2) {
-                                clearInterval(video._stallTimer); video._stallTimer = null;
+                                clearInterval(stallTimer);
                                 console.warn('[flv] 卡顿检测触发，尝试切 CDN');
                                 const curQ = art.quality;
                                 const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
@@ -856,14 +857,14 @@ function startDouyinDanmaku(roomId) {
                     video.addEventListener('ended', function onFlvEnded() {
                         if (!lastRoomUrl) return;
                         console.warn('[flv] 流已结束(onSourceEnded)，token可能过期，1秒后重新解析...');
-                        clearInterval(video._stallTimer); video._stallTimer = null;
+                        clearInterval(stallTimer);
                         setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
                     });
 
                     player.on(mpegts.Events.ERROR, (err) => {
                         if (err.type === 'fatal' && art && lastRoomUrl) {
                             console.warn('[flv] 致命错误，尝试切 CDN', err);
-                            clearInterval(video._stallTimer); video._stallTimer = null;
+                            clearInterval(stallTimer);
                             const curQ = art.quality;
                             const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
                             if (nxt) art.switchQuality(nxt);
@@ -1039,7 +1040,6 @@ function startDouyinDanmaku(roomId) {
                 if (customName === null) return;
                 name = customName.trim() || defaultName;
                 platform = getPlatformName(url);
-                avatar = '';
             }
             follows.unshift({ url, name, platform, status: 'unknown', t: Date.now(), avatar: avatar || '' });
             logStatus('已关注 ' + name);
