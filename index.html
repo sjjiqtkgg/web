@@ -830,12 +830,12 @@
                         enableStashBuffer: false,
                         stashInitialSize: 128,
                         liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 4.0,   
+                        liveBufferLatencyMaxLatency: 4.0,   // 从 4.0 改为 3.0
                         liveBufferLatencyMinRemain: 0.5,
                         autoCleanupSourceBuffer: true,
-                        autoCleanupMaxBackwardDuration: 8,  
-                        autoCleanupMinBackwardDuration: 2,  
-                        lazyLoad: false,                     
+                        autoCleanupMaxBackwardDuration: 8,  // 从 10 改为 8
+                        autoCleanupMinBackwardDuration: 2,  // 从 5 改为 2
+                        lazyLoad: false,                     // 关闭 lazyLoad，直播更依赖实时数据
                         lazyLoadMaxDuration: 0,
                         reconnectInterval: 5,
                         reconnectAttempts: 3,
