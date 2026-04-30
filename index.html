@@ -267,7 +267,8 @@
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         let html = '';
         items.forEach(item => {
-            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${escapeHtml(item.avatar)}" alt="">` : '<div class="history-avatar"></div>';
+            const _havUrl = item.avatar ? `${API_BASE}/api/proxy?url=${encodeURIComponent(item.avatar)}&referer=${encodeURIComponent('https://www.huya.com/')}` : '';
+            let avatarHtml = _havUrl ? `<img class="history-avatar" src="${_havUrl}" onerror="this.style.display='none'" alt="">` : '<div class="history-avatar"></div>';
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
@@ -304,7 +305,8 @@
         let html = '';
         items.forEach((x, i) => {
             const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${escapeHtml(x.avatar)}" alt="">` : '<div class="follow-avatar"></div>';
+            const _favUrl = x.avatar ? `${API_BASE}/api/proxy?url=${encodeURIComponent(x.avatar)}&referer=${encodeURIComponent('https://www.huya.com/')}` : '';
+            const avatarHtml = _favUrl ? `<img class="follow-avatar" src="${_favUrl}" onerror="this.style.display='none'" alt="">` : '<div class="follow-avatar"></div>';
             html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
         });
         followListDiv.innerHTML = html;
