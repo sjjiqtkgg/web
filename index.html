@@ -640,71 +640,62 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
-    // ==================== 抖音弹幕（最终修复版） ====================
-    function startDouyinDanmaku(roomId) {
-        if (!danmakuEnabled || !roomId) return;
-        if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+function startDouyinDanmaku(roomId) {
+    if (!danmakuEnabled || !roomId) return;
+    if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
 
-        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
-        const ws = new WebSocket(wsUrl);
-        douyinWs = ws;
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
+    const ws = new WebSocket(wsUrl);
+    douyinWs = ws;
 
-        ws.onopen = () => {
-            console.log('[抖音弹幕] 已连接房间', roomId);
-            // 直接发送测试弹幕验证渲染
-            addChatMessage('系统', '弹幕连接成功！');
-            const heartbeat = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send('ping');
-                } else {
-                    clearInterval(heartbeat);
-                }
-            }, 30000);
-        };
-
-        ws.onmessage = (event) => {
-            if (event.data === 'pong') return;
-            console.log('[抖音弹幕] 收到原始消息:', event.data);
-            try {
-                const msg = JSON.parse(event.data);
-                console.log('[抖音弹幕] 解析后消息:', msg);
-                // 所有消息都直接调用 addChatMessage 进行渲染
-                if (msg.type === 'chat') {
-                    addChatMessage(msg.nick || '匿名用户', msg.content || '');
-                } else if (msg.type === 'gift') {
-                    addChatMessage(msg.nick || '匿名用户', `🎁 送了 ${msg.count || 1} 个 ${msg.gift || '礼物'}`);
-                } else if (msg.type === 'like') {
-                    addChatMessage(msg.nick || '匿名用户', `👍 点赞 x${msg.count || 1}`);
-                } else {
-                    // 未知类型也显示出来，便于排查
-                    addChatMessage(msg.nick || msg.type, JSON.stringify(msg));
-                }
-            } catch(e) {
-                console.error('[抖音弹幕] 解析错误', e, event.data);
+    ws.onopen = () => {
+        console.log('[抖音弹幕] 已连接房间', roomId);
+        // 测试渲染链路
+        addChatMessage('系统', '弹幕连接成功！');
+        const heartbeat = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send('ping');
+            } else {
+                clearInterval(heartbeat);
             }
-        };
+        }, 30000);
+    };
 
-        ws.onclose = () => {
-            console.log('[抖音弹幕] 连接断开');
-            if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                setTimeout(() => startDouyinDanmaku(roomId), 3000);
+    ws.onmessage = (event) => {
+        if (event.data === 'pong') return;
+        console.log('[抖音弹幕] 收到原始消息:', event.data);
+        try {
+            const msg = JSON.parse(event.data);
+            console.log('[抖音弹幕] 解析后消息:', msg);
+            if (msg.type === 'chat' && msg.nick && msg.content) {
+                addChatMessage(msg.nick, msg.content);
+            } else if (msg.type === 'gift') {
+                addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
+            } else if (msg.type === 'like') {
+                addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
+            } else {
+                console.warn('[抖音弹幕] 未知消息类型:', msg.type);
             }
-        };
+        } catch(e) {
+            console.error('[抖音弹幕] 解析错误', e, event.data);
+        }
+    };
 
-        ws.onerror = (e) => { console.error('[抖音弹幕] 错误', e); };
-    }
+    ws.onclose = () => {
+        console.log('[抖音弹幕] 连接断开');
+        if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+            setTimeout(() => startDouyinDanmaku(roomId), 3000);
+        }
+    };
 
-    // 修复后的 addChatMessage，增强调试日志
+    ws.onerror = (e) => {
+        console.error('[抖音弹幕] 错误', e);
+    };
+}
+
     function addChatMessage(nick, text) {
-        console.log('[addChatMessage]', nick, text);
-        if (!danmakuEnabled || currentTab !== 'danmaku') {
-            console.warn('[addChatMessage] 弹幕未开启或不在弹幕标签页，忽略');
-            return;
-        }
-        if (!text || typeof text !== 'string' || !text.trim()) {
-            console.warn('[addChatMessage] 消息内容为空，忽略');
-            return;
-        }
+        if (!danmakuEnabled || currentTab !== 'danmaku') return;
+        if (!text || !text.trim()) return;
         currentChatList.push({ nick: nick.substring(0,30), text: text.substring(0,200) });
         if (currentChatList.length > CHAT_MAX) currentChatList.shift();
         renderChatMessages();
