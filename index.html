@@ -8,7 +8,6 @@
     <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -641,108 +640,45 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
-// ========== 抖音弹幕 protobuf 解析工具 ==========
-function readVarint(buf, pos) {
-    let result = 0, shift = 0, b;
-    do { b = buf[pos++]; result |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80);
-    return { value: result >>> 0, pos };
-}
-function parseProtoFields(buf) {
-    const fields = {}; let pos = 0;
-    while (pos < buf.length) {
-        const tag = readVarint(buf, pos); pos = tag.pos;
-        const fieldNum = tag.value >>> 3, wireType = tag.value & 0x7;
-        if (wireType === 0) {
-            const v = readVarint(buf, pos); pos = v.pos;
-            fields[fieldNum] = (fields[fieldNum] || []).concat(v.value);
-        } else if (wireType === 2) {
-            const len = readVarint(buf, pos); pos = len.pos;
-            const bytes = buf.slice(pos, pos + len.value); pos += len.value;
-            fields[fieldNum] = (fields[fieldNum] || []).concat([bytes]);
-        } else { break; }
-    }
-    return fields;
-}
-function bytesToStr(bytes) {
-    try { return new TextDecoder().decode(bytes); } catch(e) { return ''; }
-}
-
-async function startDouyinDanmaku(roomId) {
+function startDouyinDanmaku(roomId) {
     if (!danmakuEnabled || !roomId) return;
     if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
 
-    // 从后端获取签名后的 WS URL
-    let wsUrl;
-    try {
-        const r = await fetch(`${API_BASE}/api/douyin/sign?room_id=${roomId}`);
-        const d = await r.json();
-        wsUrl = d.wsUrl;
-    } catch(e) {
-        console.error('[抖音弹幕] 获取签名失败', e);
-        return;
-    }
-
+    const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
     const ws = new WebSocket(wsUrl);
-    ws.binaryType = 'arraybuffer';
     douyinWs = ws;
 
     ws.onopen = () => {
-        console.log('[抖音弹幕] 前端直连成功', roomId);
+        console.log('[抖音弹幕] 已连接房间', roomId);
+        // 测试渲染链路
         addChatMessage('系统', '弹幕连接成功！');
-        // 心跳
         const heartbeat = setInterval(() => {
             if (ws.readyState === WebSocket.OPEN) {
-                // 发送心跳 PushFrame payloadType=bh
-                const heartbeatFrame = new Uint8Array([0x3a, 0x02, 0x62, 0x68]);
-                ws.send(heartbeatFrame);
-            } else { clearInterval(heartbeat); }
-        }, 10000);
+                ws.send('ping');
+            } else {
+                clearInterval(heartbeat);
+            }
+        }, 30000);
     };
 
     ws.onmessage = (event) => {
+        if (event.data === 'pong') return;
+        console.log('[抖音弹幕] 收到原始消息:', event.data);
         try {
-            const data = new Uint8Array(event.data);
-            // 解析 PushFrame
-            const frame = parseProtoFields(data);
-            const payload = frame[3] && frame[3][0];
-            if (!payload) return;
-            // gzip 解压
-            let decompressed;
-            try { decompressed = pako.ungzip(payload); }
-            catch(e) { decompressed = payload; }
-            // 解析 Response
-            const resp = parseProtoFields(decompressed);
-            const messages = resp[2] || [];
-            for (const msgBytes of messages) {
-                try {
-                    const msg = parseProtoFields(msgBytes);
-                    const method = msg[1] && msg[1][0] ? bytesToStr(msg[1][0]) : '';
-                    const payload2 = msg[3] && msg[3][0];
-                    if (!payload2) continue;
-                    if (method === 'WebcastChatMessage') {
-                        const chat = parseProtoFields(payload2);
-                        const user = chat[2] && chat[2][0] ? parseProtoFields(chat[2][0]) : {};
-                        const nick = user[3] && user[3][0] ? bytesToStr(user[3][0]) : '匿名';
-                        const text = chat[1] && chat[1][0] ? bytesToStr(chat[1][0]) : '';
-                        if (text) addChatMessage(nick, text);
-                    } else if (method === 'WebcastGiftMessage') {
-                        const gift = parseProtoFields(payload2);
-                        const user = gift[7] && gift[7][0] ? parseProtoFields(gift[7][0]) : {};
-                        const nick = user[3] && user[3][0] ? bytesToStr(user[3][0]) : '匿名';
-                        const giftInfo = gift[15] && gift[15][0] ? parseProtoFields(gift[15][0]) : {};
-                        const giftName = giftInfo[2] && giftInfo[2][0] ? bytesToStr(giftInfo[2][0]) : '礼物';
-                        const count = gift[17] && gift[17][0] ? gift[17][0] : 1;
-                        addChatMessage(nick, `🎁 送了 ${count} 个 ${giftName}`);
-                    } else if (method === 'WebcastLikeMessage') {
-                        const like = parseProtoFields(payload2);
-                        const user = like[5] && like[5][0] ? parseProtoFields(like[5][0]) : {};
-                        const nick = user[3] && user[3][0] ? bytesToStr(user[3][0]) : '匿名';
-                        const count = like[2] && like[2][0] ? like[2][0] : 1;
-                        addChatMessage(nick, `👍 点赞 x${count}`);
-                    }
-                } catch(e) {}
+            const msg = JSON.parse(event.data);
+            console.log('[抖音弹幕] 解析后消息:', msg);
+            if (msg.type === 'chat' && msg.nick && msg.content) {
+                addChatMessage(msg.nick, msg.content);
+            } else if (msg.type === 'gift') {
+                addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
+            } else if (msg.type === 'like') {
+                addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
+            } else {
+                console.warn('[抖音弹幕] 未知消息类型:', msg.type);
             }
-        } catch(e) { console.error('[抖音弹幕] 解析错误', e); }
+        } catch(e) {
+            console.error('[抖音弹幕] 解析错误', e, event.data);
+        }
     };
 
     ws.onclose = () => {
@@ -752,7 +688,9 @@ async function startDouyinDanmaku(roomId) {
         }
     };
 
-    ws.onerror = (e) => console.error('[抖音弹幕] 错误', e);
+    ws.onerror = (e) => {
+        console.error('[抖音弹幕] 错误', e);
+    };
 }
 
     function addChatMessage(nick, text) {
