@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-cxe9.onrender.com';  // ⚠️ 务必改成你自己的 Render 地址
+    const API_BASE = 'https://live1-cxe9.onrender.com';  // 改成你自己的Render地址
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -106,7 +106,7 @@
           a=ff(a,b,c,d,x[i+4],7,-176418897);d=ff(d,a,b,c,x[i+5],12,1200080426);c=ff(c,d,a,b,x[i+6],17,-1473231341);b=ff(b,c,d,a,x[i+7],22,-45705983);
           a=ff(a,b,c,d,x[i+8],7,1770035416);d=ff(d,a,b,c,x[i+9],12,-1958414417);c=ff(c,d,a,b,x[i+10],17,-42063);b=ff(b,c,d,a,x[i+11],22,-1990404162);
           a=ff(a,b,c,d,x[i+12],7,1804603682);d=ff(d,a,b,c,x[i+13],12,-40341101);c=ff(c,d,a,b,x[i+14],17,-1502002290);b=ff(b,c,d,a,x[i+15],22,1236535329);
-          a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+3],14,643717713);b=gg(b,c,d,a,x[i],20,-373897302);
+          a=gg(a,b,c,d,x[i+1],5,-165796510);d=gg(d,a,b,c,x[i+6],9,-1069501632);c=gg(c,d,a,b,x[i+11],14,643717713);b=gg(b,c,d,a,x[i],20,-373897302);
           a=gg(a,b,c,d,x[i+5],5,-701558691);d=gg(d,a,b,c,x[i+10],9,38016083);c=gg(c,d,a,b,x[i+15],14,-660478335);b=gg(b,c,d,a,x[i+4],20,-405537848);
           a=gg(a,b,c,d,x[i+9],5,568446438);d=gg(d,a,b,c,x[i+14],9,-1019803690);c=gg(c,d,a,b,x[i+3],14,-187363961);b=gg(b,c,d,a,x[i+8],20,1163531501);
           a=gg(a,b,c,d,x[i+13],5,-1444681467);d=gg(d,a,b,c,x[i+2],9,-51403784);c=gg(c,d,a,b,x[i+7],14,1735328473);b=gg(b,c,d,a,x[i+12],20,-1926607734);
@@ -912,7 +912,7 @@
                         }
                     });
                 },
-                // 修改后的 m3u8 自定义播放器，包含 Twitch 和 SOOP CORS 代理
+                // ----- 修改后的 m3u8 播放器，包含 SOOP 代理（简洁无语法错误） -----
                 m3u8: function(video, url) {
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
                     if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
@@ -933,11 +933,9 @@
                                             context.url.includes('twitch.tv') ||
                                             context.url.includes('sooplive')
                                         )) {
-                                            let targetUrl = (context.url.includes('sooplive')) ? url : context.url;
-                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(targetUrl)}&referer=https://play.sooplive.com`;
-                                            context.url = proxyUrl;
-                                          }
-                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(fullUrl)}&referer=https://play.sooplive.com`;
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(
+                                                context.url.includes('sooplive') ? url : context.url
+                                            )}&referer=https://play.sooplive.com`;
                                             context.url = proxyUrl;
                                         }
                                         load(context, config, callbacks);
