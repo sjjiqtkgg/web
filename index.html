@@ -248,6 +248,7 @@
         if (url.includes('huya.com')) return '虎牙';
         if (url.includes('douyu.com')) return '斗鱼';
         if (url.includes('bilibili.com')) return 'B站';
+        if (url.includes('twitch.tv')) return 'Twitch';
         if (url.includes('douyin.com')) return '抖音';
         return '未知';
     }
@@ -640,6 +641,45 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
+
+// ========== Twitch 弹幕（IRC WebSocket）==========
+let twitchWs = null;
+function startTwitchDanmaku(channel) {
+    if (!danmakuEnabled || !channel) return;
+    if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
+
+    const ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
+    twitchWs = ws;
+
+    ws.onopen = () => {
+        ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+        ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
+        ws.send('JOIN #' + channel.toLowerCase());
+        addChatMessage('系统', 'Twitch 弹幕连接成功！');
+    };
+
+    ws.onmessage = (e) => {
+        const lines = e.data.split('\r\n');
+        for (const line of lines) {
+            if (line.includes('PING')) { ws.send('PONG :tmi.twitch.tv'); continue; }
+            const match = line.match(/display-name=([^;]*)[^:]*:([^!]+)![^:]*PRIVMSG[^:]*:(.+)/);
+            if (match) {
+                const nick = match[1] || match[2];
+                const text = match[3].trim();
+                if (nick && text) addChatMessage(nick, text);
+            }
+        }
+    };
+
+    ws.onclose = () => {
+        if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
+            setTimeout(() => startTwitchDanmaku(channel), 3000);
+        }
+    };
+
+    ws.onerror = (e) => console.error('[Twitch弹幕] 错误', e);
+}
+
 function startDouyinDanmaku(roomId) {
     if (!danmakuEnabled || !roomId) return;
     if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
@@ -907,6 +947,7 @@ function startDouyinDanmaku(roomId) {
             updateFollowBtn(lastRoomUrl);
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
             if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+            if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
 
             if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                 const roomId = lastRoomUrl.split('/').pop().split('?')[0];
@@ -916,6 +957,9 @@ function startDouyinDanmaku(roomId) {
             } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
                 const roomId = window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0];
                 startDouyinDanmaku(roomId);
+            } else if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
+                const channel = lastRoomUrl.split('/').pop().split('?')[0];
+                startTwitchDanmaku(channel);
             }
         });
         art.on('video:volumechange', () => {
