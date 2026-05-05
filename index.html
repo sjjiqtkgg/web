@@ -772,7 +772,7 @@
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
-        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv'))) {
+        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv') || raw.includes('sooplive.com'))) {
             try {
                 const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
