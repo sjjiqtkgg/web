@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -249,6 +250,7 @@
         if (url.includes('douyu.com')) return '斗鱼';
         if (url.includes('bilibili.com')) return 'B站';
         if (url.includes('twitch.tv')) return 'Twitch';
+        if (url.includes('sooplive')) return 'SOOP';
         if (url.includes('douyin.com')) return '抖音';
         return '未知';
     }
@@ -642,22 +644,19 @@
     }
 
 
-// ========== Twitch 弹幕（IRC WebSocket）==========
+// ========== Twitch 弹幕（IRC）==========
 let twitchWs = null;
 function startTwitchDanmaku(channel) {
     if (!danmakuEnabled || !channel) return;
     if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
-
     const ws = new WebSocket('wss://irc-ws.chat.twitch.tv');
     twitchWs = ws;
-
     ws.onopen = () => {
         ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
         ws.send('NICK justinfan' + Math.floor(Math.random() * 99999));
         ws.send('JOIN #' + channel.toLowerCase());
         addChatMessage('系统', 'Twitch 弹幕连接成功！');
     };
-
     ws.onmessage = (e) => {
         const lines = e.data.split('\r\n');
         for (const line of lines) {
@@ -670,13 +669,10 @@ function startTwitchDanmaku(channel) {
             }
         }
     };
-
     ws.onclose = () => {
-        if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
+        if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv'))
             setTimeout(() => startTwitchDanmaku(channel), 3000);
-        }
     };
-
     ws.onerror = (e) => console.error('[Twitch弹幕] 错误', e);
 }
 
