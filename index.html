@@ -52,7 +52,7 @@
 </head>
 <body>
 <div id="bar">
-    <input id="url" type="text" placeholder="虎牙/斗鱼/B站/抖音/Twitch 直播间地址，或 .flv/.m3u8 直链" spellcheck="false">
+    <input id="url" type="text" placeholder="虎牙/斗鱼/B站/抖音/Twitch/SOOP 直播间地址，或 .flv/.m3u8 直链" spellcheck="false">
     <button id="btn-play" onclick="window.go()">播放</button>
     <button id="btn-fav" onclick="window.toggleFollow()" title="关注">★</button>
     <button onclick="window.openOriginalUrl()" title="原网页">🔗</button>
@@ -251,6 +251,7 @@
         if (url.includes('bilibili.com')) return 'B站';
         if (url.includes('douyin.com')) return '抖音';
         if (url.includes('twitch.tv')) return 'Twitch';
+        if (url.includes('sooplive.com')) return 'SOOP';
         return '未知';
     }
 
@@ -911,7 +912,7 @@
                         }
                     });
                 },
-                // 修改后的 m3u8 自定义播放器，包含 Twitch CORS 代理
+                // 修改后的 m3u8 自定义播放器，包含 Twitch 和 SOOP CORS 代理
                 m3u8: function(video, url) {
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
                     if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
@@ -922,14 +923,18 @@
                             lowLatencyMode: true,
                             maxBufferLength: 8,
                             maxMaxBufferLength: 16,
-                            // 自定义 loader：将 ttvnw.net 的请求重定向到 API 代理
+                            // 自定义 loader：将 ttvnw.net、twitch.tv、sooplive 的请求重定向到 API 代理
                             loader: class extends Hls.DefaultConfig.loader {
                                 constructor(config) {
                                     super(config);
                                     const load = this.load.bind(this);
                                     this.load = function(context, config, callbacks) {
-                                        if (context.url && (context.url.includes('ttvnw.net') || context.url.includes('twitch.tv'))) {
-                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=https://player.twitch.tv`;
+                                        if (context.url && (
+                                            context.url.includes('ttvnw.net') ||
+                                            context.url.includes('twitch.tv') ||
+                                            context.url.includes('sooplive')
+                                        )) {
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=https://play.sooplive.com`;
                                             context.url = proxyUrl;
                                         }
                                         load(context, config, callbacks);
