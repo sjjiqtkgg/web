@@ -87,7 +87,7 @@
 
 <script>
     // ======================= 配置区域 =======================
-    const API_BASE = 'https://live1-cxe9.onrender.com';
+    const API_BASE = 'https://你的后端地址';  // ⚠️ 务必改成你自己的 Render 地址
 
     // ========== 斗鱼 MD5 签名 ==========
     function ub98484234_md5(str) {
@@ -911,6 +911,7 @@
                         }
                     });
                 },
+                // 修改后的 m3u8 自定义播放器，包含 Twitch CORS 代理
                 m3u8: function(video, url) {
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
                     if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
@@ -920,8 +921,23 @@
                             liveMaxLatencyDurationCount: 5,
                             lowLatencyMode: true,
                             maxBufferLength: 8,
-                            maxMaxBufferLength: 16
+                            maxMaxBufferLength: 16,
+                            // 自定义 loader：将 ttvnw.net 的请求重定向到 API 代理
+                            loader: class extends Hls.DefaultConfig.loader {
+                                constructor(config) {
+                                    super(config);
+                                    const load = this.load.bind(this);
+                                    this.load = function(context, config, callbacks) {
+                                        if (context.url && (context.url.includes('ttvnw.net') || context.url.includes('twitch.tv'))) {
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=https://player.twitch.tv`;
+                                            context.url = proxyUrl;
+                                        }
+                                        load(context, config, callbacks);
+                                    };
+                                }
+                            }
                         });
+
                         hls.loadSource(url);
                         hls.attachMedia(video);
                         hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
