@@ -933,11 +933,10 @@
                                             context.url.includes('twitch.tv') ||
                                             context.url.includes('sooplive')
                                         )) {
-                                            let fullUrl = context.url;
-                                            if (fullUrl === 'https://livestream-manager.sooplive.com' ||
-                                                fullUrl === 'https://livestream-manager.sooplive.com/') {
-                                                fullUrl = url;
-                                            }
+                                            let targetUrl = (context.url.includes('sooplive')) ? url : context.url;
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(targetUrl)}&referer=https://play.sooplive.com`;
+                                            context.url = proxyUrl;
+                                          }
                                             const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(fullUrl)}&referer=https://play.sooplive.com`;
                                             context.url = proxyUrl;
                                         }
