@@ -134,7 +134,7 @@
             const tt  = String(Math.floor(Date.now() / 1000));
             const cryptoShim = 'var CryptoJS={MD5:function(s){' + ub98484234_md5.toString() +
                                ';return{toString:function(){return ub98484234_md5(s);}};},enc:{Hex:{}}};';
-            const execCode = cryptoShim + crptext + '\n return ub98484234("' + roomId + '","' + did + '",' + tt + ');';
+            const execCode = cryptoShim + crptext + '\n return ub98484234("' + roomId + '","' + did + '",' + tt + ',0);';
             const signParams = new Function(execCode)();
             if (!signParams) throw new Error('sign 为空');
 
