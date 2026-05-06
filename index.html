@@ -252,6 +252,7 @@
         if (url.includes('douyin.com')) return '抖音';
         if (url.includes('twitch.tv')) return 'Twitch';
         if (url.includes('pandalive.co.kr')) return 'PandaTV';
+        if (url.includes('sooplive')) return 'SOOP';
         return '未知';
     }
 
@@ -772,7 +773,7 @@
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
-        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv') || raw.includes('pandalive.co.kr'))) {
+        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv') || raw.includes('pandalive.co.kr') || raw.includes('sooplive.co.kr') || raw.includes('sooplive.com'))) {
             try {
                 const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
