@@ -653,13 +653,43 @@
             if (event.data === 'pong') return;
             try {
                 const msg = JSON.parse(event.data);
-                if (msg.type === 'chat' && msg.nick && msg.content) {
-                    addChatMessage(msg.nick, msg.content);
-                } else if (msg.type === 'gift') {
-                    addChatMessage(msg.nick, `🎁 送了 ${msg.count} 个 ${msg.gift}`);
-                } else if (msg.type === 'like') {
-                    addChatMessage(msg.nick, `👍 点赞 x${msg.count}`);
+                // 系统消息：直播状态等
+                if (msg.type === 'system') {
+                    if (msg.live) {
+                        addChatMessage('系统', '直播间已开播');
+                    } else if (msg.ended) {
+                        addChatMessage('系统', '直播间已下播');
+                    } else {
+                        addChatMessage('系统', msg.message || '状态变更');
+                    }
+                    return;
                 }
+                // douyinLive 标准格式：弹幕
+                if (msg.method === 'WebcastChatMessage') {
+                    const nick = (msg.user && msg.user.nickname) || '匿名用户';
+                    const content = msg.content;
+                    if (content && content.trim()) {
+                        addChatMessage(nick, content);
+                    }
+                    return;
+                }
+                // douyinLive 标准格式：礼物
+                if (msg.method === 'WebcastGiftMessage') {
+                    const nick = (msg.user && msg.user.nickname) || '匿名用户';
+                    const giftName = (msg.gift && msg.gift.name) || '礼物';
+                    const count = msg.count || 1;
+                    addChatMessage(nick, `🎁 送了 ${count} 个 ${giftName}`);
+                    return;
+                }
+                // douyinLive 标准格式：点赞
+                if (msg.method === 'WebcastLikeMessage') {
+                    const nick = (msg.user && msg.user.nickname) || '匿名用户';
+                    const count = msg.count || 1;
+                    addChatMessage(nick, `👍 点赞 x${count}`);
+                    return;
+                }
+                // 其他消息类型，可以打印到控制台方便调试
+                console.log('[抖音弹幕] 未处理的消息:', msg);
             } catch(e) {
                 console.error('[抖音弹幕] 解析错误', e, event.data);
             }
