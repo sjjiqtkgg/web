@@ -629,9 +629,15 @@
         ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
     }
 
+    // ==================== 抖音弹幕（修复版） ====================
     function startDouyinDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
-        if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
+        // 关闭旧连接前，先清除旧的心跳定时器
+        if (douyinWs) {
+            if (douyinWs._heartbeat) clearInterval(douyinWs._heartbeat);
+            try { douyinWs.close(); } catch(e) {}
+            douyinWs = null;
+        }
 
         const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
         const ws = new WebSocket(wsUrl);
@@ -640,46 +646,45 @@
         ws.onopen = () => {
             console.log('[抖音弹幕] 已连接房间', roomId);
             addChatMessage('系统', '弹幕连接成功！');
-            const heartbeat = setInterval(() => {
+            // 修复：心跳定时器挂载到ws对象，方便onclose时清除
+            ws._heartbeat = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send('ping');
                 } else {
-                    clearInterval(heartbeat);
+                    clearInterval(ws._heartbeat);
                 }
-            }, 30000);
+            }, 15000); // 缩短至15秒，预防反代超时
         };
 
         ws.onmessage = (event) => {
             if (event.data === 'pong') return;
             try {
                 const msg = JSON.parse(event.data);
-                // 系统消息：直播状态等
+                // 系统消息
                 if (msg.type === 'system') {
-                    if (msg.live) {
-                        addChatMessage('系统', '直播间已开播');
-                    } else if (msg.ended) {
-                        addChatMessage('系统', '直播间已下播');
-                    } else {
-                        addChatMessage('系统', msg.message || '状态变更');
-                    }
+                    const text = msg.message || (msg.live ? '直播已开始' : '直播已结束');
+                    addChatMessage('系统', text);
                     return;
                 }
-                // 只处理弹幕消息
+                // 弹幕
                 if (msg.method === 'WebcastChatMessage') {
                     const nick = (msg.user && msg.user.nickname) || '匿名用户';
                     const content = msg.content || '';
-                    if (content.trim()) {
-                        addChatMessage(nick, content);
-                    }
+                    if (content.trim()) addChatMessage(nick, content);
                 }
-                // 礼物、点赞及其他消息均忽略
             } catch(e) {
                 console.error('[抖音弹幕] 解析错误', e, event.data);
             }
         };
 
         ws.onclose = () => {
+            // 修复：安全清除定时器
+            if (ws._heartbeat) {
+                clearInterval(ws._heartbeat);
+                ws._heartbeat = null;
+            }
             if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
+                console.log('[抖音弹幕] 连接断开，3秒后重连...');
                 setTimeout(() => startDouyinDanmaku(roomId), 3000);
             }
         };
