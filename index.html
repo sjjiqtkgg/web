@@ -545,15 +545,11 @@
             if (event.data === 'pong') return;
             try {
                 const msg = JSON.parse(event.data);
-                if (msg.type === 'system') {
-                    addChatMessage('系统', msg.message || (msg.live ? '直播已开始' : '直播已结束'));
-                    return;
-                }
-                if (msg.method === 'WebcastChatMessage') {
-                    const nick = (msg.user && msg.user.nickname) || '匿名用户';
-                    const content = msg.content || '';
-                    if (content.trim()) addChatMessage(nick, content);
-                }
+                if (msg.method !== 'WebcastChatMessage') return;
+                
+                const nick = (msg.user && msg.user.nickname) || '匿名用户';
+                const content = msg.content || '';
+                if (content.trim()) addChatMessage(nick, content);
             } catch(e) { console.error('[抖音弹幕] 解析错误', e, event.data); }
         };
         ws.onclose = () => {
