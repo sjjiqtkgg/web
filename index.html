@@ -138,13 +138,13 @@
             const signParams = new Function(execCode)();
             if (!signParams) throw new Error('sign 为空');
 
+            // ✅ 修复：传递 did 作为 cookie，让后端注入 acf_did
             const proxyBase = `${API_BASE}/api/proxy?` + new URLSearchParams({
                 url: `https://www.douyu.com/lapi/live/getH5Play/${roomId}`,
-                referer: `https://www.douyu.com/${roomId}`
-                // ✅ Origin 头现在由后端从 referer 自动推导，无需前端传递
+                referer: `https://www.douyu.com/${roomId}`,
+                cookie: `dy_did=${did}`  // 新增 cookie 参数
             });
 
-            // ✅ 修复：先检查 HTTP 状态码，再解析 JSON，提供清晰的错误信息
             const r0 = await fetch(proxyBase, {
                 method: 'POST',
                 body: signParams + '&cdn=&rate=-1&ver=Douyu_223061205&iar=1&ive=1&hevc=0&fa=0'
@@ -244,7 +244,6 @@
 
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
-        // 只有后端确实没返回主播名时才用房间号兜底
         if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) {
             const roomId = lastRoomUrl.split('/').pop().split('?')[0];
             anchorName = `房间 ${roomId}`;
@@ -648,30 +647,22 @@
     // ==================== 抖音弹幕（修复版） ====================
     function startDouyinDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
-        // 关闭旧连接前，先清除旧的心跳定时器
         if (douyinWs) {
             if (douyinWs._heartbeat) clearInterval(douyinWs._heartbeat);
             try { douyinWs.close(); } catch(e) {}
             douyinWs = null;
         }
-
         const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
         const ws = new WebSocket(wsUrl);
         douyinWs = ws;
-
         ws.onopen = () => {
             console.log('[抖音弹幕] 已连接房间', roomId);
             addChatMessage('系统', '弹幕连接成功！');
-            // 心跳定时器挂载到 ws 对象，onclose 时可正确清除
             ws._heartbeat = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send('ping');
-                } else {
-                    clearInterval(ws._heartbeat);
-                }
-            }, 15000); // 15秒，预防反代 idle 超时
+                if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+                else clearInterval(ws._heartbeat);
+            }, 15000);
         };
-
         ws.onmessage = (event) => {
             if (event.data === 'pong') return;
             try {
@@ -690,32 +681,22 @@
                 console.error('[抖音弹幕] 解析错误', e, event.data);
             }
         };
-
         ws.onclose = () => {
-            if (ws._heartbeat) {
-                clearInterval(ws._heartbeat);
-                ws._heartbeat = null;
-            }
+            if (ws._heartbeat) { clearInterval(ws._heartbeat); ws._heartbeat = null; }
             if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                console.log('[抖音弹幕] 连接断开，3秒后重连...');
                 setTimeout(() => startDouyinDanmaku(roomId), 3000);
             }
         };
-
-        ws.onerror = (e) => {
-            console.error('[抖音弹幕] 错误', e);
-        };
+        ws.onerror = (e) => { console.error('[抖音弹幕] 错误', e); };
     }
 
     // ==================== Twitch 弹幕 ====================
     function startTwitchDanmaku(channelName) {
         if (!danmakuEnabled || !channelName) return;
         if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
-
         const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/twitch/' + channelName;
         const ws = new WebSocket(wsUrl);
         twitchWs = ws;
-
         ws.onopen = () => {
             console.log('[Twitch弹幕] 已连接频道', channelName);
             addChatMessage('系统', `✔ Twitch 弹幕已连线`);
@@ -725,22 +706,13 @@
             }, 30000);
             ws._heartbeat = heartbeat;
         };
-
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
-                if (msg.nick && msg.content) {
-                    addChatMessage(msg.nick, msg.content);
-                }
-            } catch(e) {
-                console.error('[Twitch弹幕] 解析错误', e);
-            }
+                if (msg.nick && msg.content) addChatMessage(msg.nick, msg.content);
+            } catch(e) { console.error('[Twitch弹幕] 解析错误', e); }
         };
-
-        ws.onerror = (err) => {
-            console.error('[Twitch弹幕] WebSocket 错误', err);
-        };
-
+        ws.onerror = (err) => { console.error('[Twitch弹幕] WebSocket 错误', err); };
         ws.onclose = () => {
             clearInterval(ws._heartbeat);
             if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
@@ -964,7 +936,6 @@
                                 }
                             }
                         });
-
                         hls.loadSource(url);
                         hls.attachMedia(video);
                         hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
