@@ -956,7 +956,11 @@
                                             }
                                         }
                                         if (needProxy) {
-                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=https://play.sooplive.com`;
+                                            let referer = 'https://play.sooplive.com'; // 默认
+                                            if (context.url.includes('ttvnw.net') || context.url.includes('twitch.tv')) {
+                                            referer = 'https://player.twitch.tv';
+                                        }
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=${referer}`;
                                             context.url = proxyUrl;
                                         }
                                         load(context, config, callbacks);
