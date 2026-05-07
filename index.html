@@ -141,10 +141,23 @@
             const proxyBase = `${API_BASE}/api/proxy?` + new URLSearchParams({
                 url: `https://www.douyu.com/lapi/live/getH5Play/${roomId}`,
                 referer: `https://www.douyu.com/${roomId}`
+                // ✅ Origin 头现在由后端从 referer 自动推导，无需前端传递
             });
-            const r0 = await fetch(proxyBase, { method: 'POST', body: signParams + '&cdn=&rate=-1&ver=Douyu_223061205&iar=1&ive=1&hevc=0&fa=0' });
-            const d0 = await r0.json();
-            if (d0.error !== 0) throw new Error('斗鱼拉流: ' + (d0.msg || d0.error));
+
+            // ✅ 修复：先检查 HTTP 状态码，再解析 JSON，提供清晰的错误信息
+            const r0 = await fetch(proxyBase, {
+                method: 'POST',
+                body: signParams + '&cdn=&rate=-1&ver=Douyu_223061205&iar=1&ive=1&hevc=0&fa=0'
+            });
+            if (!r0.ok) throw new Error(`斗鱼API返回 ${r0.status}，请检查代理或签名是否过期`);
+
+            let d0;
+            try {
+                d0 = await r0.json();
+            } catch(e) {
+                throw new Error('斗鱼响应非JSON，接口可能已变更');
+            }
+            if (d0.error !== 0) throw new Error('斗鱼拉流: ' + (d0.msg || JSON.stringify(d0.error)));
 
             let cdns = (d0.data.cdnsWithName || []).map(x => x.cdn).filter(x => x && !x.startsWith('scdn'));
             if (!cdns.length) cdns = ['tct-h5', 'ali-h5', 'hw-h5'];
@@ -162,6 +175,7 @@
             for (const cdn of sortedCdns) {
                 try {
                     const r = await fetch(proxyBase, { method: 'POST', body: signParams + `&cdn=${cdn}&rate=0` });
+                    if (!r.ok) continue;
                     const d = await r.json();
                     if (d.error === 0 && d.data && d.data.rtmp_url) {
                         const url = d.data.rtmp_url + '/' + d.data.rtmp_live.replace(/&amp;/g, '&');
@@ -178,6 +192,7 @@
             }
 
             if (!streams.length) {
+                if (!d0.data.rtmp_url) throw new Error('无可用流地址');
                 const fallback = d0.data.rtmp_url + '/' + d0.data.rtmp_live.replace(/&amp;/g, '&');
                 streams.push({ cdn: '斗鱼', url: ensureHttps(fallback), type: 'flv' });
             }
@@ -229,6 +244,7 @@
 
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
+        // 只有后端确实没返回主播名时才用房间号兜底
         if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) {
             const roomId = lastRoomUrl.split('/').pop().split('?')[0];
             anchorName = `房间 ${roomId}`;
@@ -646,27 +662,25 @@
         ws.onopen = () => {
             console.log('[抖音弹幕] 已连接房间', roomId);
             addChatMessage('系统', '弹幕连接成功！');
-            // 修复：心跳定时器挂载到ws对象，方便onclose时清除
+            // 心跳定时器挂载到 ws 对象，onclose 时可正确清除
             ws._heartbeat = setInterval(() => {
                 if (ws.readyState === WebSocket.OPEN) {
                     ws.send('ping');
                 } else {
                     clearInterval(ws._heartbeat);
                 }
-            }, 15000); // 缩短至15秒，预防反代超时
+            }, 15000); // 15秒，预防反代 idle 超时
         };
 
         ws.onmessage = (event) => {
             if (event.data === 'pong') return;
             try {
                 const msg = JSON.parse(event.data);
-                // 系统消息
                 if (msg.type === 'system') {
                     const text = msg.message || (msg.live ? '直播已开始' : '直播已结束');
                     addChatMessage('系统', text);
                     return;
                 }
-                // 弹幕
                 if (msg.method === 'WebcastChatMessage') {
                     const nick = (msg.user && msg.user.nickname) || '匿名用户';
                     const content = msg.content || '';
@@ -678,7 +692,6 @@
         };
 
         ws.onclose = () => {
-            // 修复：安全清除定时器
             if (ws._heartbeat) {
                 clearInterval(ws._heartbeat);
                 ws._heartbeat = null;
