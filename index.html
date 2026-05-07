@@ -945,9 +945,11 @@
                                     const load = this.load.bind(this);
                                     this.load = function(context, config, callbacks) {
                                         let needProxy = false;
+                                        // Twitch 分片实际在 twitchsvc.net CDN 上，需一并代理
                                         if (context.url && (
                                             context.url.includes('ttvnw.net') ||
                                             context.url.includes('twitch.tv') ||
+                                            context.url.includes('twitchsvc.net') ||
                                             context.url.includes('sooplive') ||
                                             context.url.includes('pandalive')
                                         )) {
@@ -956,11 +958,13 @@
                                             }
                                         }
                                         if (needProxy) {
-                                            let referer = 'https://play.sooplive.com'; // 默认
-                                            if (context.url.includes('ttvnw.net') || context.url.includes('twitch.tv')) {
-                                            referer = 'https://player.twitch.tv';
-                                        }
-                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=${referer}`;
+                                            let referer = 'https://play.sooplive.com';
+                                            if (context.url.includes('ttvnw.net') ||
+                                                context.url.includes('twitch.tv') ||
+                                                context.url.includes('twitchsvc.net')) {
+                                                referer = 'https://player.twitch.tv';
+                                            }
+                                            const proxyUrl = `${API_BASE}/api/proxy?url=${encodeURIComponent(context.url)}&referer=${encodeURIComponent(referer)}`;
                                             context.url = proxyUrl;
                                         }
                                         load(context, config, callbacks);
