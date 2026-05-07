@@ -627,23 +627,23 @@
 
     // ==================== 代理判定：只给国外平台加代理 ====================
     function getProxyUrl(originalUrl) {
-        const NEED_PROXY_DOMAINS = [
-            'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
-            'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
-            'pandalive.co.kr', 'pandalivecdn.com'
-        ];
-        const shouldProxy = NEED_PROXY_DOMAINS.some(domain => originalUrl.includes(domain));
-        if (shouldProxy) {
-            let referer = 'https://play.sooplive.com';
-            if (originalUrl.includes('twitch.tv') || originalUrl.includes('ttvnw.net') || originalUrl.includes('twitchsvc.net')) {
-                referer = 'https://player.twitch.tv';
-            } else if (originalUrl.includes('pandalive')) {
-                referer = 'https://www.pandalive.co.kr/';
-            }
-            return `${API_BASE}/api/proxy?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+    const NEED_PROXY = [
+        'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
+        'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
+        'pandalive.co.kr', 'pandalivecdn.com'
+    ];
+    const shouldProxy = NEED_PROXY.some(domain => originalUrl.includes(domain));
+    if (shouldProxy) {
+        let referer = 'https://play.sooplive.com';  // 默认 SOOP
+        if (currentPlatform === 'Twitch') {
+            referer = 'https://player.twitch.tv';
+        } else if (currentPlatform === 'PandaTV') {
+            referer = 'https://www.pandalive.co.kr/';
         }
-        return originalUrl;  // 国内直连
+        return `${API_BASE}/api/proxy?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
     }
+    return originalUrl;
+}
 
     async function goWithUrl(raw) {
         if (!raw) return;
