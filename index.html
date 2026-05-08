@@ -628,7 +628,9 @@
         'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
         'pandalive.co.kr', 'pandalivecdn.com'
     ];
-    const shouldProxy = NEED_PROXY.some(domain => originalUrl.includes(domain));
+    // PandaTV 子流可能分发自任意 CDN（CloudFront 等），统一走代理
+    const shouldProxy = currentPlatform === 'PandaTV'
+        || NEED_PROXY.some(domain => originalUrl.includes(domain));
     if (shouldProxy) {
         let referer = 'https://play.sooplive.com';  // 默认 SOOP
         if (currentPlatform === 'Twitch') {
