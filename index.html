@@ -59,6 +59,7 @@
     <button class="bar-tab active" data-tab="danmaku">📢 弹幕</button>
     <button class="bar-tab" data-tab="follow">★ 关注</button>
     <button class="bar-tab" data-tab="history">🕒 历史</button>
+    <button class="bar-tab" data-tab="settings">⚙ 设置</button>
 </div>
 <div id="main">
     <div id="player-container">
@@ -78,6 +79,19 @@
             </div>
             <div class="follow-list" id="follow-list" style="display:none;"></div>
             <div class="history-list" id="history-list" style="display:none;"></div>
+            <div id="settings-panel" style="display:none;padding:12px;overflow-y:auto;color:#ccc;flex-direction:column;gap:0;">
+                <div style="font-size:13px;font-weight:bold;color:#f5a623;margin-bottom:6px;">🔞 SOOP 登录 Cookie</div>
+                <div style="font-size:11px;color:#888;margin-bottom:8px;line-height:1.6;">
+                    访问 19+ 直播间需要 Cookie。<br>
+                    获取：登录 sooplive.com → DevTools → Application → Cookies，复制全部。
+                </div>
+                <textarea id="soop-cookie-input" rows="5" style="width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #444;border-radius:6px;padding:8px;color:#ddd;font-size:11px;font-family:monospace;resize:vertical;"></textarea>
+                <div style="margin-top:8px;display:flex;gap:8px;">
+                    <button onclick="window.saveSoopCookieUI()" style="flex:1;background:#f5a623;color:#000;border:none;padding:8px;border-radius:6px;cursor:pointer;font-weight:bold;">保存</button>
+                    <button onclick="window.clearSoopCookieUI()" style="background:#444;color:#ddd;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;">清除</button>
+                </div>
+                <div id="soop-cookie-status" style="font-size:11px;color:#6f6;margin-top:6px;min-height:18px;"></div>
+            </div>
         </div>
     </div>
 </div>
@@ -112,6 +126,8 @@
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
+    function getSoopCookie() { try { return localStorage.getItem('ps_soop_cookie') || ''; } catch(e) { return ''; } }
+    function saveSoopCookie(v) { try { localStorage.setItem('ps_soop_cookie', v); } catch(e) {} }
     function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
 
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
@@ -225,7 +241,9 @@
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             try {
-                const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}`);
+                const _sc2 = item.url.includes('sooplive.com') ? getSoopCookie() : '';
+                const _pu2 = `${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (_sc2 ? `&cookie=${encodeURIComponent(_sc2)}` : '');
+                const r = await fetch(_pu2);
                 if (r.status === 400) { item.status = 'offline'; continue; }
                 if (!r.ok) { item.status = 'error'; continue; }
                 const d = await r.json();
@@ -657,7 +675,9 @@
 
         if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv') || raw.includes('pandalive.co.kr') || raw.includes('sooplive.com'))) {
             try {
-                const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`);
+                const _soopCookie = raw.includes('sooplive.com') ? getSoopCookie() : '';
+                const _parseUrl = `${API_BASE}/api/parse?url=${encodeURIComponent(raw)}` + (_soopCookie ? `&cookie=${encodeURIComponent(_soopCookie)}` : '');
+                const resp = await fetch(_parseUrl);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
                 if (data.error) throw new Error(data.error);
@@ -894,6 +914,7 @@
                     chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
                     followListDiv.style.display = 'none';
                     historyListDiv.style.display = 'none';
+                    document.getElementById('settings-panel').style.display = 'none';
                     renderChatMessages();
                 } else if (tab === 'follow') {
                     headerTitle.innerText = '关注列表';
@@ -904,6 +925,7 @@
                     chatMessagesDiv.style.display = 'none';
                     followListDiv.style.display = 'flex';
                     historyListDiv.style.display = 'none';
+                    document.getElementById('settings-panel').style.display = 'none';
                     renderFollowList();
                 } else if (tab === 'history') {
                     headerTitle.innerText = '播放历史';
@@ -912,7 +934,21 @@
                     chatMessagesDiv.style.display = 'none';
                     followListDiv.style.display = 'none';
                     historyListDiv.style.display = 'flex';
+                    document.getElementById('settings-panel').style.display = 'none';
                     renderHistoryList();
+                } else if (tab === 'settings') {
+                    headerTitle.innerText = '设置';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'none';
+                    const sp = document.getElementById('settings-panel');
+                    sp.style.display = 'flex';
+                    // load saved cookie into textarea
+                    document.getElementById('soop-cookie-input').value = getSoopCookie();
+                    const sc = getSoopCookie();
+                    document.getElementById('soop-cookie-status').textContent = sc ? `✅ 已保存 (${sc.length} 字符)` : '';
                 }
             });
         });
