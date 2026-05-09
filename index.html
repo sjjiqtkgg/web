@@ -622,6 +622,10 @@
     }
 
     // ==================== 代理判定：只给国外平台加代理 ====================
+    // 国外平台播放走 CF Worker（不过 Render，带宽无限，不封 IP）
+    // 国内平台继续直连
+    const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
+
     function getProxyUrl(originalUrl) {
     const NEED_PROXY = [
         'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
@@ -638,7 +642,8 @@
         } else if (currentPlatform === 'PandaTV') {
             referer = 'https://www.pandalive.co.kr/';
         }
-        return `${API_BASE}/api/proxy?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+        // 走 CF Worker，完全不经过 Render 后端
+        return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
     }
     return originalUrl;
 }
