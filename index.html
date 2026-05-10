@@ -546,7 +546,8 @@
             try {
                 const msg = JSON.parse(event.data);
                 if (msg.method !== 'WebcastChatMessage') return;
-                
+                // chatBy==="9" 是福袋口令消息的系统标识，精准过滤不误杀正常弹幕
+                if (msg.chatBy === '9') return;
                 const nick = (msg.user && msg.user.nickname) || '匿名用户';
                 const content = msg.content || '';
                 if (content.trim()) addChatMessage(nick, content);
@@ -622,10 +623,6 @@
     }
 
     // ==================== 代理判定：只给国外平台加代理 ====================
-    // 国外平台播放走 CF Worker（不过 Render，带宽无限，不封 IP）
-    // 国内平台继续直连
-    const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
-
     function getProxyUrl(originalUrl) {
     const NEED_PROXY = [
         'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
@@ -642,8 +639,7 @@
         } else if (currentPlatform === 'PandaTV') {
             referer = 'https://www.pandalive.co.kr/';
         }
-        // 走 CF Worker，完全不经过 Render 后端
-        return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+        return `${API_BASE}/api/proxy?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
     }
     return originalUrl;
 }
