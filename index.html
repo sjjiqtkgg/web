@@ -626,6 +626,9 @@
     const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function getProxyUrl(originalUrl) {
+    // 已经是 CF Worker 地址，直接返回，避免双重包装
+    if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
+
     const NEED_PROXY = [
         'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
         'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
