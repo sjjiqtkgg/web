@@ -855,7 +855,35 @@
                         hls.attachMedia(video);
                         hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                         hls.on(Hls.Events.ERROR, (e, data) => {
-                            if (data.fatal) {
+                            if (!data.fatal) {
+                                // Twitch：缓冲卡住时自动跳到直播最新位置
+                                if (currentPlatform === 'Twitch' && (
+                                    data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+                                    data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL)) {
+                                    console.warn('[hls][Twitch] 缓冲卡住，自动跳到直播最新位置');
+                                    try {
+                                        if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
+                                        video.play().catch(() => {});
+                                    } catch(e) {}
+                                }
+                                return;
+                            }
+                            if (currentPlatform === 'Twitch') {
+                                // Twitch 致命错误自动恢复（广告剥除后 DISCONTINUITY 导致播放器卡住）
+                                console.warn('[hls][Twitch] 致命错误', data.type, data.details, '→ 自动恢复');
+                                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                                    setTimeout(() => {
+                                        try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {}
+                                    }, 1500);
+                                } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                                    hls.recoverMediaError();
+                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
+                                } else {
+                                    hls.destroy();
+                                    window._hlsInst = null;
+                                }
+                            } else {
+                                // 其他平台保持原有行为
                                 console.warn('[hls] 致命错误', data.type, data.details);
                                 hls.destroy();
                                 window._hlsInst = null;
@@ -1017,26 +1045,6 @@
         }
     }
 
-    window.saveSoopCookieUI = function() {
-        const val = document.getElementById('soop-cookie-input').value.trim();
-        saveSoopCookie(val);
-        document.getElementById('soop-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
-    };
-    window.clearSoopCookieUI = function() {
-        document.getElementById('soop-cookie-input').value = '';
-        saveSoopCookie('');
-        document.getElementById('soop-cookie-status').textContent = '已清除';
-    };
-    window.saveTwitchCookieUI = function() {
-        const val = document.getElementById('twitch-cookie-input').value.trim();
-        saveTwitchCookie(val);
-        document.getElementById('twitch-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
-    };
-    window.clearTwitchCookieUI = function() {
-        document.getElementById('twitch-cookie-input').value = '';
-        saveTwitchCookie('');
-        document.getElementById('twitch-cookie-status').textContent = '已清除';
-    };
     window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl;
