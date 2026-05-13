@@ -1017,6 +1017,26 @@
         }
     }
 
+    window.saveSoopCookieUI = function() {
+        const val = document.getElementById('soop-cookie-input').value.trim();
+        saveSoopCookie(val);
+        document.getElementById('soop-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
+    };
+    window.clearSoopCookieUI = function() {
+        document.getElementById('soop-cookie-input').value = '';
+        saveSoopCookie('');
+        document.getElementById('soop-cookie-status').textContent = '已清除';
+    };
+    window.saveTwitchCookieUI = function() {
+        const val = document.getElementById('twitch-cookie-input').value.trim();
+        saveTwitchCookie(val);
+        document.getElementById('twitch-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
+    };
+    window.clearTwitchCookieUI = function() {
+        document.getElementById('twitch-cookie-input').value = '';
+        saveTwitchCookie('');
+        document.getElementById('twitch-cookie-status').textContent = '已清除';
+    };
     window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl;
