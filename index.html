@@ -23,6 +23,13 @@
         #main { flex: 1; display: flex; min-height: 0; }
         #player-container { flex: 1; background: #000; position: relative; }
         #player { width: 100%; height: 100%; }
+        #offline-overlay { display: none; position: absolute; inset: 0; background: rgba(0,0,0,0.82); z-index: 99; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+        #offline-overlay.show { display: flex; }
+        .offline-icon { font-size: 52px; }
+        .offline-text { color: #fff; font-size: 18px; font-weight: 500; }
+        .offline-sub { color: #aaa; font-size: 13px; }
+        .offline-retry { margin-top: 8px; padding: 8px 24px; background: #f5a623; color: #000; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .offline-retry:hover { background: #e09510; }
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; }
         .chat-header span { color: #f5a623; font-weight: 500; }
@@ -64,6 +71,12 @@
 <div id="main">
     <div id="player-container">
         <div id="player"></div>
+        <div id="offline-overlay">
+            <div class="offline-icon">📴</div>
+            <div class="offline-text" id="offline-text">主播已下播</div>
+            <div class="offline-sub" id="offline-sub">直播已结束</div>
+            <button class="offline-retry" onclick="hideOfflineOverlay(); if(lastRoomUrl) goWithUrl(lastRoomUrl);">🔄 重新检测</button>
+        </div>
     </div>
     <div id="chat-panel">
         <div class="chat-header">
@@ -149,6 +162,18 @@
 
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
     function logStatus(msg) { console.log('[状态]', msg); }
+
+    function showOfflineOverlay(anchorName) {
+        const el = document.getElementById('offline-overlay');
+        const name = anchorName || currentAnchorName || '主播';
+        document.getElementById('offline-text').textContent = name + ' 已下播';
+        document.getElementById('offline-sub').textContent = '直播已结束，可点击下方按钮重新检测';
+        el.classList.add('show');
+    }
+
+    function hideOfflineOverlay() {
+        document.getElementById('offline-overlay').classList.remove('show');
+    }
 
     function loadVolumeMemory() {
         let vol = localStorage.getItem('ps_volume');
@@ -255,16 +280,15 @@
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
+        await Promise.all(items.map(async (item) => {
             try {
                 const _sc1 = item.url.includes('sooplive.com') ? getSoopCookie() : '';
                 const _tc1 = item.url.includes('twitch.tv') ? getTwitchCookie() : '';
                 const _ck1 = _sc1 || _tc1;
                 const _pu1 = `${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (_ck1 ? `&cookie=${encodeURIComponent(_ck1)}` : '');
                 const r = await fetch(_pu1);
-                if (r.status === 400) { item.status = 'offline'; continue; }
-                if (!r.ok) { item.status = 'error'; continue; }
+                if (r.status === 400) { item.status = 'offline'; return; }
+                if (!r.ok) { item.status = 'error'; return; }
                 const d = await r.json();
                 if (d.error) { item.status = 'error'; }
                 else if (d.streams && d.streams.length) {
@@ -272,8 +296,7 @@
                     if (d.avatar && !item.avatar) item.avatar = d.avatar;
                 } else { item.status = 'offline'; }
             } catch(e) { item.status = 'error'; }
-            await new Promise(r => setTimeout(r, 500));
-        }
+        }));
         _saveFollows(items);
         renderFollowList();
     }
@@ -720,8 +743,14 @@
                     dmConfig = data.danmaku || null;
                     if (raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
                     if (raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
+                    hideOfflineOverlay();
                 } else {
-                    throw new Error('未获取到流地址');
+                    // 解析成功但没有流 → 主播下播
+                    currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                    logStatus('📴 ' + currentAnchorName + ' 暂未开播');
+                    showOfflineOverlay(currentAnchorName);
+                    setBtn(false);
+                    return;
                 }
             } catch(e) {
                 logStatus('❌ ' + e.message);
@@ -812,6 +841,7 @@
                     player.load();
                     video._mpegts = player;
 
+                    video._reParseCount = 0; // 重新解析计数，防止下播时死循环
                     let lastTime = -1, stallCount = 0;
                     video._stallTimer = setInterval(() => {
                         // 若本定时器属于已被替换的旧实例，立即退出
@@ -823,8 +853,16 @@
                             stallCount++;
                             if (stallCount >= 3) {   // 7.5 秒无进度 → 判定卡死，重新解析
                                 clearInterval(video._stallTimer); video._stallTimer = null;
-                                console.warn('[flv] 卡顿超时，重新解析直播流');
-                                if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                if (lastRoomUrl) {
+                                    video._reParseCount = (video._reParseCount || 0) + 1;
+                                    if (video._reParseCount <= 3) {
+                                        console.warn('[flv] 卡顿超时，重新解析直播流（第' + video._reParseCount + '次）');
+                                        setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                    } else {
+                                        console.warn('[flv] 多次重试失败，判定主播已下播');
+                                        showOfflineOverlay(currentAnchorName);
+                                    }
+                                }
                             }
                         } else { stallCount = 0; }
                         lastTime = ct;
