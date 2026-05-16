@@ -293,7 +293,7 @@
                 if (d.error) { item.status = 'error'; }
                 else if (d.streams && d.streams.length) {
                     item.status = 'online';
-                    if (d.avatar && !item.avatar) item.avatar = d.avatar;
+                if (d.avatar) item.avatar = d.avatar;
                 } else { item.status = 'offline'; }
             } catch(e) { item.status = 'error'; }
         }));
