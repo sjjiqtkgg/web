@@ -780,11 +780,19 @@
             quality: qualityList,
             customType: {
                 flv: function(video, url) {
+                    // ① 先清除旧定时器
                     if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
+                    // ② 先置 null 再销毁旧实例，防止旧实例的异步回调再触发 SourceBuffer 访问
                     if (video._mpegts) {
-                        try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){}
+                        const oldPlayer = video._mpegts;
                         video._mpegts = null;
+                        try { oldPlayer.unload(); oldPlayer.detachMediaElement(); oldPlayer.destroy(); } catch(e){}
                     }
+                    // ③ 用实例 ID 标记本次播放器，过滤已过期的回调
+                    video._playerIdCounter = (video._playerIdCounter || 0) + 1;
+                    const playerId = video._playerIdCounter;
+                    video._playerId = playerId;
+
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
                         enableStashBuffer: false,
@@ -796,8 +804,8 @@
                         autoCleanupMaxBackwardDuration: 10,
                         autoCleanupMinBackwardDuration: 5,
                         lazyLoad: false,
-                        reconnectInterval: 3,
-                        reconnectAttempts: 2,
+                        reconnectInterval: 0,
+                        reconnectAttempts: 0,    // 禁用 mpegts 内部重连，由外部统一控制避免竞态
                         fixAudioTimestampGap: false
                     });
                     player.attachMediaElement(video);
@@ -806,38 +814,36 @@
 
                     let lastTime = -1, stallCount = 0;
                     video._stallTimer = setInterval(() => {
-                        if (!art || !video) { clearInterval(video._stallTimer); video._stallTimer = null; return; }
+                        // 若本定时器属于已被替换的旧实例，立即退出
+                        if (video._playerId !== playerId || !art || !video) {
+                            clearInterval(video._stallTimer); video._stallTimer = null; return;
+                        }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
-                            if (stallCount >= 2) {
+                            if (stallCount >= 3) {   // 7.5 秒无进度 → 判定卡死，重新解析
                                 clearInterval(video._stallTimer); video._stallTimer = null;
-                                console.warn('[flv] 卡顿，尝试切 CDN');
-                                const curQ = art.quality;
-                                const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
-                                if (nxt) art.switchQuality(nxt);
-                                else if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                console.warn('[flv] 卡顿超时，重新解析直播流');
+                                if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
                             }
                         } else { stallCount = 0; }
                         lastTime = ct;
                     }, 2500);
 
                     video.addEventListener('ended', function onFlvEnded() {
+                        if (video._playerId !== playerId) return; // 忽略旧实例事件
                         if (!lastRoomUrl) return;
                         console.warn('[flv] 流已结束，重新解析');
                         clearInterval(video._stallTimer); video._stallTimer = null;
                         setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
                     });
 
-                    player.on(mpegts.Events.ERROR, (err) => {
-                        if (err.type === 'fatal' && art && lastRoomUrl) {
-                            console.warn('[flv] 致命错误，切 CDN', err);
-                            clearInterval(video._stallTimer); video._stallTimer = null;
-                            const curQ = art.quality;
-                            const nxt = art.qualityList && art.qualityList.find(q => q.html !== (curQ && curQ.html));
-                            if (nxt) art.switchQuality(nxt);
-                            else setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                        }
+                    player.on(mpegts.Events.ERROR, (errType, errDetail) => {
+                        // 忽略已被替换的旧实例产生的错误（这是 SourceBuffer 崩溃的根源）
+                        if (video._mpegts !== player) return;
+                        console.warn('[flv] 错误:', errType, errDetail);
+                        clearInterval(video._stallTimer); video._stallTimer = null;
+                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1500);
                     });
                 },
                 m3u8: function(video, url) {
@@ -928,21 +934,26 @@
         art.on('quality', (q) => {
             if (!q) return;
             logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
-            if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
-            if (art?.video?._mpegts) {
-                try { art.video._mpegts.unload(); art.video._mpegts.detachMediaElement(); art.video._mpegts.destroy(); } catch(e){}
-                art.video._mpegts = null;
-            }
+            // 注意：cleanup 由各 customType 处理函数自身负责，此处不重复清理
+            // 避免销毁 customType 刚建好的新实例（造成竞态）
         });
     }
 
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && art && art.playing) {
+        if (!document.hidden && art) {
             const video = art.video;
-            if (video) {
-                const currentTime = video.currentTime;
-                video.currentTime = currentTime;
+            if (!video || video.paused) return;
+            // HLS：标签页回来后跳到直播最新位置（避免延迟累积）
+            if (window._hlsInst) {
+                try {
+                    const livePos = window._hlsInst.liveSyncPosition;
+                    if (livePos && Math.abs(video.currentTime - livePos) > 3) {
+                        video.currentTime = livePos;
+                        video.play().catch(() => {});
+                    }
+                } catch(e) {}
             }
+            // FLV：stall 定时器会自动检测并重新解析，无需额外处理
         }
     });
 
