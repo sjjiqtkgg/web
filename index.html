@@ -887,59 +887,101 @@
                 m3u8: function(video, url) {
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
                     if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
-                    if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                        const hls = new Hls({
-                            liveSyncDurationCount: 2,
-                            liveMaxLatencyDurationCount: 5,
-                            lowLatencyMode: true,
-                            maxBufferLength: 8,
-                            maxMaxBufferLength: 16
-                        });
-                        hls.loadSource(url);
-                        hls.attachMedia(video);
-                        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
-                        hls.on(Hls.Events.ERROR, (e, data) => {
-                            if (!data.fatal) {
-                                // Twitch：缓冲卡住时自动跳到直播最新位置
-                                if (currentPlatform === 'Twitch' && (
-                                    data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-                                    data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL)) {
-                                    console.warn('[hls][Twitch] 缓冲卡住，自动跳到直播最新位置');
-                                    try {
-                                        if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
-                                        video.play().catch(() => {});
-                                    } catch(e) {}
+                    if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
+
+                    // 实例 ID，防止旧实例回调干扰新实例
+                    video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
+                    const hlsId = video._hlsIdCounter;
+                    video._hlsId = hlsId;
+                    video._hlsReParseCount = 0;
+
+                    const startHls = (srcUrl) => {
+                        if (video._hlsId !== hlsId) return;
+                        if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
+
+                        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                            const hls = new Hls({
+                                liveSyncDurationCount: 2,
+                                liveMaxLatencyDurationCount: 5,
+                                lowLatencyMode: true,
+                                maxBufferLength: 8,
+                                maxMaxBufferLength: 16
+                            });
+                            hls.loadSource(srcUrl);
+                            hls.attachMedia(video);
+                            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                            hls.on(Hls.Events.ERROR, (e, data) => {
+                                if (video._hlsId !== hlsId) return;
+                                if (!data.fatal) {
+                                    if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
+                                        data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
+                                        console.warn('[hls] 缓冲卡住，跳到最新位置');
+                                        try {
+                                            if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
+                                            video.play().catch(() => {});
+                                        } catch(e) {}
+                                    }
+                                    return;
                                 }
-                                return;
-                            }
-                            if (currentPlatform === 'Twitch') {
-                                // Twitch 致命错误自动恢复（广告剥除后 DISCONTINUITY 导致播放器卡住）
-                                console.warn('[hls][Twitch] 致命错误', data.type, data.details, '→ 自动恢复');
+                                console.warn('[hls] 致命错误', data.type, data.details);
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                                    setTimeout(() => {
-                                        try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {}
-                                    }, 1500);
+                                    // 网络错误：先尝试 startLoad 恢复，再重新解析
+                                    video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
+                                    if (video._hlsReParseCount <= 2) {
+                                        console.warn(`[hls] 网络错误，尝试 startLoad 恢复（第${video._hlsReParseCount}次）`);
+                                        setTimeout(() => {
+                                            try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {
+                                                if (lastRoomUrl) goWithUrl(lastRoomUrl);
+                                            }
+                                        }, 2000);
+                                    } else {
+                                        console.warn('[hls] 多次网络错误，重新解析直播流');
+                                        hls.destroy(); window._hlsInst = null;
+                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
+                                        else showOfflineOverlay(currentAnchorName);
+                                    }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                                     hls.recoverMediaError();
                                     setTimeout(() => { video.play().catch(() => {}); }, 500);
                                 } else {
-                                    hls.destroy();
-                                    window._hlsInst = null;
+                                    hls.destroy(); window._hlsInst = null;
+                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                 }
-                            } else {
-                                // 其他平台保持原有行为
-                                console.warn('[hls] 致命错误', data.type, data.details);
-                                hls.destroy();
-                                window._hlsInst = null;
+                            });
+                            window._hlsInst = hls;
+                        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                            video.src = srcUrl;
+                            video.play();
+                        } else {
+                            console.error('浏览器不支持 HLS 播放');
+                        }
+                    };
+
+                    startHls(url);
+
+                    // stall 定时器：10秒无进度且未暂停 → 重新解析
+                    let lastTime = -1, stallCount = 0;
+                    video._hlsStallTimer = setInterval(() => {
+                        if (video._hlsId !== hlsId || !art || !video) {
+                            clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; return;
+                        }
+                        const ct = video.currentTime;
+                        if (ct === lastTime && !video.paused && !video.ended) {
+                            stallCount++;
+                            if (stallCount >= 4) {  // 10秒无进度
+                                clearInterval(video._hlsStallTimer); video._hlsStallTimer = null;
+                                video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
+                                if (video._hlsReParseCount <= 3) {
+                                    console.warn(`[hls] 卡顿超时，重新解析（第${video._hlsReParseCount}次）`);
+                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                } else {
+                                    console.warn('[hls] 多次重试失败，判定主播已下播');
+                                    showOfflineOverlay(currentAnchorName);
+                                }
                             }
-                        });
-                        window._hlsInst = hls;
-                    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                        video.src = url;
-                        video.play();
-                    } else {
-                        console.error('浏览器不支持 HLS 播放');
-                    }
+                        } else { stallCount = 0; }
+                        lastTime = ct;
+                    }, 2500);
                 }
             }
         });
@@ -972,8 +1014,11 @@
         art.on('quality', (q) => {
             if (!q) return;
             logStatus('▶ ' + q.html + ' · ' + (q.type || '').toUpperCase());
-            // 注意：cleanup 由各 customType 处理函数自身负责，此处不重复清理
-            // 避免销毁 customType 刚建好的新实例（造成竞态）
+            // cleanup 由 customType 自身负责，此处只清 HLS stall 定时器
+            if (art.video && art.video._hlsStallTimer) {
+                clearInterval(art.video._hlsStallTimer);
+                art.video._hlsStallTimer = null;
+            }
         });
     }
 
