@@ -925,7 +925,17 @@
                                 }
                                 console.warn('[hls] 致命错误', data.type, data.details);
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                                    // 网络错误：先尝试 startLoad 恢复，再重新解析
+                                    // manifestLoadError：m3u8 本身加载失败，直接重新解析
+                                    if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                                        data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+                                        console.warn('[hls] manifest 加载失败，重新解析直播流');
+                                        hls.destroy(); window._hlsInst = null;
+                                        if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
+                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
+                                        else showOfflineOverlay(currentAnchorName);
+                                        return;
+                                    }
+                                    // 其他网络错误：先尝试 startLoad 恢复，再重新解析
                                     video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
                                     if (video._hlsReParseCount <= 2) {
                                         console.warn(`[hls] 网络错误，尝试 startLoad 恢复（第${video._hlsReParseCount}次）`);
