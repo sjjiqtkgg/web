@@ -149,7 +149,7 @@
     let followListDiv = null;
     let historyListDiv = null;
     let sortable = null;
-    const HISTORY_MAX = 30;
+    const HISTORY_MAX = 100;
 
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
