@@ -139,9 +139,23 @@
     let currentAvatar = '';
     let danmakuEnabled = true;
     let currentTab = 'danmaku';
+    
+    // =========================
+    // 弹幕相关全局变量与连接锁
+    // =========================
     let dmWs = null;
     let douyinWs = null;
     let twitchWs = null;
+    
+    // 当前弹幕房间（防止流重连时重复初始化弹幕）
+    let currentDanmakuRoom = '';
+
+    // 防止各个平台重复连接的锁
+    let douyuConnecting = false;
+    let huyaConnecting = false;
+    let douyinConnecting = false;
+    let twitchConnecting = false;
+
     let dmConfig = null;
     let currentChatList = [];
     const CHAT_MAX = 300;
@@ -149,7 +163,7 @@
     let followListDiv = null;
     let historyListDiv = null;
     let sortable = null;
-    const HISTORY_MAX = 30;
+    const HISTORY_MAX = 100;
 
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
@@ -159,6 +173,30 @@
     function getTwitchCookie() { try { return localStorage.getItem('ps_twitch_cookie') || ''; } catch(e) { return ''; } }
     function saveTwitchCookie(v) { try { localStorage.setItem('ps_twitch_cookie', v); } catch(e) {} }
     function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
+
+    // ==========================================
+    // 修复：UI 绑定的 Cookie 保存和清除函数
+    // ==========================================
+    window.saveSoopCookieUI = () => {
+        const val = document.getElementById('soop-cookie-input').value.trim();
+        saveSoopCookie(val);
+        document.getElementById('soop-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
+    };
+    window.clearSoopCookieUI = () => {
+        document.getElementById('soop-cookie-input').value = '';
+        saveSoopCookie('');
+        document.getElementById('soop-cookie-status').textContent = '✅ 已清除';
+    };
+    window.saveTwitchCookieUI = () => {
+        const val = document.getElementById('twitch-cookie-input').value.trim();
+        saveTwitchCookie(val);
+        document.getElementById('twitch-cookie-status').textContent = val ? `✅ 已保存 (${val.length} 字符)` : '已清除';
+    };
+    window.clearTwitchCookieUI = () => {
+        document.getElementById('twitch-cookie-input').value = '';
+        saveTwitchCookie('');
+        document.getElementById('twitch-cookie-status').textContent = '✅ 已清除';
+    };
 
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
     function logStatus(msg) { console.log('[状态]', msg); }
@@ -304,6 +342,9 @@
     // ==================== 斗鱼弹幕 ====================
     function startDouyuDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
+        if (douyuConnecting) return;
+        douyuConnecting = true;
+
         if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
         function enc(payload) {
             const body = new TextEncoder().encode(payload);
@@ -328,6 +369,7 @@
         ws.binaryType = 'arraybuffer';
         dmWs = ws;
         ws.onopen = () => {
+            douyuConnecting = false;
             ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
             ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
             setInterval(() => { if (ws.readyState === 1) ws.send(enc('type@=mrkl/')); }, 45000);
@@ -349,7 +391,15 @@
                 offset += 4 + packLen;
             }
         };
-        ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startDouyuDanmaku(roomId), 3000); };
+        ws.onclose = () => { 
+            douyuConnecting = false;
+            if (dmWs === ws && danmakuEnabled) {
+                setTimeout(() => {
+                    if (currentDanmakuRoom === lastRoomUrl) startDouyuDanmaku(roomId);
+                }, 3000); 
+            }
+        };
+        ws.onerror = () => { douyuConnecting = false; };
     }
 
     // ==================== 虎牙弹幕（Tars） ====================
@@ -511,6 +561,9 @@
 
     function startHuyaDanmaku(config) {
         if (!config || !config.ayyuid) return;
+        if (huyaConnecting) return;
+        huyaConnecting = true;
+
         const { ayyuid, topSid, subSid } = config;
         function tarsOut() {
             const bytes = [];
@@ -575,16 +628,33 @@
         ws.binaryType = 'arraybuffer';
         dmWs = ws;
         ws.onopen = () => {
+            huyaConnecting = false;
             ws.send(buildRegister());
             setInterval(() => { if (ws.readyState === 1) ws.send(HB); }, 60000);
         };
         ws.onmessage = (e) => { try { parseHuyaMsg(new Uint8Array(e.data)); } catch(err) {} };
-        ws.onclose = () => { if (dmWs === ws && danmakuEnabled) setTimeout(() => startHuyaDanmaku(config), 3000); };
+        ws.onclose = () => { 
+            huyaConnecting = false;
+            if (dmWs === ws && danmakuEnabled) {
+                setTimeout(() => {
+                    if (currentDanmakuRoom === lastRoomUrl) startHuyaDanmaku(config);
+                }, 3000);
+            } 
+        };
+        ws.onerror = () => { huyaConnecting = false; };
     }
 
     // ==================== 抖音弹幕（修复版） ====================
     function startDouyinDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
+        
+        // 防止重复连接
+        if (douyinConnecting) {
+            console.log('[抖音弹幕] 已在连接中，跳过');
+            return;
+        }
+        douyinConnecting = true;
+
         if (douyinWs) {
             if (douyinWs._heartbeat) clearInterval(douyinWs._heartbeat);
             try { douyinWs.close(); } catch(e) {}
@@ -594,6 +664,7 @@
         const ws = new WebSocket(wsUrl);
         douyinWs = ws;
         ws.onopen = () => {
+            douyinConnecting = false;
             console.log('[抖音弹幕] 已连接房间', roomId);
             addChatMessage('系统', '弹幕连接成功！');
             ws._heartbeat = setInterval(() => {
@@ -614,22 +685,38 @@
             } catch(e) { console.error('[抖音弹幕] 解析错误', e, event.data); }
         };
         ws.onclose = () => {
+            douyinConnecting = false;
             if (ws._heartbeat) { clearInterval(ws._heartbeat); ws._heartbeat = null; }
+            
+            // 不再因为播放器重建而反复重连
             if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                setTimeout(() => startDouyinDanmaku(roomId), 3000);
+                console.log('[抖音弹幕] 连接断开，3秒后重连');
+                setTimeout(() => {
+                    // 避免在这3秒内已经切换了房间
+                    if (currentDanmakuRoom === lastRoomUrl) {
+                        startDouyinDanmaku(roomId);
+                    }
+                }, 3000);
             }
         };
-        ws.onerror = (e) => { console.error('[抖音弹幕] 错误', e); };
+        ws.onerror = (e) => { 
+            douyinConnecting = false;
+            console.error('[抖音弹幕] 错误', e); 
+        };
     }
 
     // ==================== Twitch 弹幕 ====================
     function startTwitchDanmaku(channelName) {
         if (!danmakuEnabled || !channelName) return;
+        if (twitchConnecting) return;
+        twitchConnecting = true;
+
         if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
         const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/twitch/' + channelName;
         const ws = new WebSocket(wsUrl);
         twitchWs = ws;
         ws.onopen = () => {
+            twitchConnecting = false;
             console.log('[Twitch弹幕] 已连接频道', channelName);
             addChatMessage('系统', `✔ Twitch 弹幕已连线`);
             const heartbeat = setInterval(() => {
@@ -644,11 +731,17 @@
                 if (msg.nick && msg.content) addChatMessage(msg.nick, msg.content);
             } catch(e) { console.error('[Twitch弹幕] 解析错误', e); }
         };
-        ws.onerror = (err) => { console.error('[Twitch弹幕] WebSocket 错误', err); };
+        ws.onerror = (err) => { 
+            twitchConnecting = false;
+            console.error('[Twitch弹幕] WebSocket 错误', err); 
+        };
         ws.onclose = () => {
+            twitchConnecting = false;
             clearInterval(ws._heartbeat);
             if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
-                setTimeout(() => startTwitchDanmaku(channelName), 3000);
+                setTimeout(() => {
+                    if (currentDanmakuRoom === lastRoomUrl) startTwitchDanmaku(channelName);
+                }, 3000);
             }
         };
     }
@@ -686,29 +779,29 @@
     const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function getProxyUrl(originalUrl) {
-    // 已经是 CF Worker 地址，直接返回，避免双重包装
-    if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
+        // 已经是 CF Worker 地址，直接返回，避免双重包装
+        if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
 
-    const NEED_PROXY = [
-        'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
-        'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
-        'pandalive.co.kr', 'pandalivecdn.com'
-    ];
-    // PandaTV 子流可能分发自任意 CDN（CloudFront 等），统一走代理
-    const shouldProxy = currentPlatform === 'PandaTV'
-        || NEED_PROXY.some(domain => originalUrl.includes(domain));
-    if (shouldProxy) {
-        let referer = 'https://play.sooplive.com';  // 默认 SOOP
-        if (currentPlatform === 'Twitch') {
-            referer = 'https://player.twitch.tv';
-        } else if (currentPlatform === 'PandaTV') {
-            referer = 'https://www.pandalive.co.kr/';
+        const NEED_PROXY = [
+            'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
+            'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
+            'pandalive.co.kr', 'pandalivecdn.com'
+        ];
+        // PandaTV 子流可能分发自任意 CDN（CloudFront 等），统一走代理
+        const shouldProxy = currentPlatform === 'PandaTV'
+            || NEED_PROXY.some(domain => originalUrl.includes(domain));
+        if (shouldProxy) {
+            let referer = 'https://play.sooplive.com';  // 默认 SOOP
+            if (currentPlatform === 'Twitch') {
+                referer = 'https://player.twitch.tv';
+            } else if (currentPlatform === 'PandaTV') {
+                referer = 'https://www.pandalive.co.kr/';
+            }
+            // 走 CF Worker，不经过 Render 后端
+            return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
         }
-        // 走 CF Worker，不经过 Render 后端
-        return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+        return originalUrl;
     }
-    return originalUrl;
-}
 
     async function goWithUrl(raw) {
         if (!raw) return;
@@ -999,10 +1092,26 @@
         art.on('ready', () => {
             logStatus('▶ ' + s0.cdn + ' · ' + s0.type.toUpperCase());
             updateFollowBtn(lastRoomUrl);
+
+            // =========================
+            // 防止播放器重连导致弹幕重复重连
+            // =========================
+            if (currentDanmakuRoom === lastRoomUrl) {
+                console.log('[弹幕] 当前房间弹幕已连接，跳过重复初始化');
+                return;
+            }
+
+            // 房间变化才重连弹幕
+            currentDanmakuRoom = lastRoomUrl;
+
+            // 关闭旧连接
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
             if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
             if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
 
+            // =========================
+            // 初始化弹幕
+            // =========================
             if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                 const roomId = lastRoomUrl.split('/').pop().split('?')[0];
                 startDouyuDanmaku(roomId);
@@ -1124,10 +1233,12 @@
                 icon.textContent = danmakuEnabled ? '🔊' : '🔇';
                 icon.title = danmakuEnabled ? '关闭弹幕' : '开启弹幕';
                 if (!danmakuEnabled) {
+                    currentDanmakuRoom = ''; // 重置房间记录
                     if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
                     if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
                     if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
                 } else {
+                    currentDanmakuRoom = lastRoomUrl; // 更新为当前房间
                     if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                         const roomId = lastRoomUrl.split('/').pop().split('?')[0];
                         startDouyuDanmaku(roomId);
