@@ -74,7 +74,7 @@
         <div id="offline-overlay">
             <div class="offline-icon">📴</div>
             <div class="offline-text" id="offline-text">主播已下播</div>
-            <div class="offline-sub" id="offline-sub">直播已结束，可点击下方按钮重新检测</div>
+            <div class="offline-sub" id="offline-sub">直播已结束</div>
             <button class="offline-retry" onclick="hideOfflineOverlay(); if(lastRoomUrl) goWithUrl(lastRoomUrl);">🔄 重新检测</button>
         </div>
     </div>
@@ -140,17 +140,13 @@
     let danmakuEnabled = true;
     let currentTab = 'danmaku';
     
-    // =========================
     // 弹幕相关全局变量与连接锁
-    // =========================
     let dmWs = null;
     let douyinWs = null;
     let twitchWs = null;
     
-    // 当前弹幕房间（防止流重连时重复初始化弹幕）
     let currentDanmakuRoom = '';
 
-    // 防止各个平台重复连接的锁
     let douyuConnecting = false;
     let huyaConnecting = false;
     let douyinConnecting = false;
@@ -166,7 +162,8 @@
     const HISTORY_MAX = 100;
 
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
-    function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 50))); } catch(e) {} }
+    // 关注上限调整为 100
+    function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
     function getSoopCookie() { try { return localStorage.getItem('ps_soop_cookie') || ''; } catch(e) { return ''; } }
     function saveSoopCookie(v) { try { localStorage.setItem('ps_soop_cookie', v); } catch(e) {} }
@@ -174,7 +171,6 @@
     function saveTwitchCookie(v) { try { localStorage.setItem('ps_twitch_cookie', v); } catch(e) {} }
     function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
 
-    // UI 绑定的 Cookie 保存和清除函数
     window.saveSoopCookieUI = () => {
         const val = document.getElementById('soop-cookie-input').value.trim();
         saveSoopCookie(val);
@@ -645,11 +641,7 @@
     // ==================== 抖音弹幕 ====================
     function startDouyinDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
-        
-        if (douyinConnecting) {
-            console.log('[抖音弹幕] 已在连接中，跳过');
-            return;
-        }
+        if (douyinConnecting) { console.log('[抖音弹幕] 已在连接中，跳过'); return; }
         douyinConnecting = true;
 
         if (douyinWs) {
@@ -683,20 +675,14 @@
         ws.onclose = () => {
             douyinConnecting = false;
             if (ws._heartbeat) { clearInterval(ws._heartbeat); ws._heartbeat = null; }
-            
             if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
                 console.log('[抖音弹幕] 连接断开，3秒后重连');
                 setTimeout(() => {
-                    if (currentDanmakuRoom === lastRoomUrl) {
-                        startDouyinDanmaku(roomId);
-                    }
+                    if (currentDanmakuRoom === lastRoomUrl) startDouyinDanmaku(roomId);
                 }, 3000);
             }
         };
-        ws.onerror = (e) => { 
-            douyinConnecting = false;
-            console.error('[抖音弹幕] 错误', e); 
-        };
+        ws.onerror = (e) => { douyinConnecting = false; console.error('[抖音弹幕] 错误', e); };
     }
 
     // ==================== Twitch 弹幕 ====================
@@ -725,10 +711,7 @@
                 if (msg.nick && msg.content) addChatMessage(msg.nick, msg.content);
             } catch(e) { console.error('[Twitch弹幕] 解析错误', e); }
         };
-        ws.onerror = (err) => { 
-            twitchConnecting = false;
-            console.error('[Twitch弹幕] WebSocket 错误', err); 
-        };
+        ws.onerror = (err) => { twitchConnecting = false; console.error('[Twitch弹幕] WebSocket 错误', err); };
         ws.onclose = () => {
             twitchConnecting = false;
             clearInterval(ws._heartbeat);
@@ -769,12 +752,10 @@
         return url;
     }
 
-    // ==================== 代理判定：只给国外平台加代理 ====================
     const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function getProxyUrl(originalUrl) {
         if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
-
         const NEED_PROXY = [
             'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
             'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
@@ -783,12 +764,9 @@
         const shouldProxy = currentPlatform === 'PandaTV'
             || NEED_PROXY.some(domain => originalUrl.includes(domain));
         if (shouldProxy) {
-            let referer = 'https://play.sooplive.com'; 
-            if (currentPlatform === 'Twitch') {
-                referer = 'https://player.twitch.tv';
-            } else if (currentPlatform === 'PandaTV') {
-                referer = 'https://www.pandalive.co.kr/';
-            }
+            let referer = 'https://play.sooplive.com';
+            if (currentPlatform === 'Twitch') referer = 'https://player.twitch.tv';
+            else if (currentPlatform === 'PandaTV') referer = 'https://www.pandalive.co.kr/';
             return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
         }
         return originalUrl;
@@ -818,10 +796,7 @@
                 if (data.error) throw new Error(data.error);
 
                 if (data.streams && data.streams.length) {
-                    streams = data.streams.map(s => ({
-                        ...s,
-                        url: ensureHttps(s.url)
-                    }));
+                    streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     dmConfig = data.danmaku || null;
@@ -860,25 +835,7 @@
     }
 
     function playStream(streams) {
-        // ==========================================
-        // 核心修复：彻底销毁外层实例，防止内存泄漏
-        // ==========================================
-        if (art) { 
-            try { 
-                if (art.flv) {
-                    art.flv.unload();
-                    art.flv.detachMediaElement();
-                    art.flv.destroy();
-                    art.flv = null;
-                }
-                if (art.hls) {
-                    art.hls.destroy();
-                    art.hls = null;
-                }
-                art.destroy(true); 
-            } catch(e){} 
-            art = null; 
-        }
+        if (art) { try { art.destroy(true); } catch(e){} art = null; }
         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
         document.getElementById('player').innerHTML = '';
 
@@ -908,30 +865,18 @@
             fullscreenWeb: true,
             lang: 'zh-cn',
             quality: qualityList,
-            // ==========================================
-            // 核心修复：引入严格的作用域控制和硬性内存限制
-            // ==========================================
             customType: {
                 flv: function(video, url) {
-                    // 利用外层的 art，确保旧实例被销毁
-                    const currentArt = art || this; 
-                    if (currentArt && currentArt.flv) {
-                        console.log('[内存控制] 销毁旧 FLV 实例');
-                        try { 
-                            currentArt.flv.unload(); 
-                            currentArt.flv.detachMediaElement(); 
-                            currentArt.flv.destroy(); 
-                        } catch(e) {}
-                        currentArt.flv = null;
-                    }
-
                     if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
-
+                    if (video._mpegts) {
+                        const oldPlayer = video._mpegts;
+                        video._mpegts = null;
+                        try { oldPlayer.unload(); oldPlayer.detachMediaElement(); oldPlayer.destroy(); } catch(e){}
+                    }
                     video._playerIdCounter = (video._playerIdCounter || 0) + 1;
                     const playerId = video._playerIdCounter;
                     video._playerId = playerId;
 
-                    // 创建新 FLV 播放器，添加了严格的缓存时间控制
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
                         enableStashBuffer: false,
@@ -947,21 +892,14 @@
                         reconnectAttempts: 0,
                         fixAudioTimestampGap: false
                     });
-                    
                     player.attachMediaElement(video);
                     player.load();
-                    
-                    if (currentArt) currentArt.flv = player;
-                    
-                    // 监听当前实例销毁事件
-                    currentArt.on('destroy', () => {
-                        if (currentArt.flv) { currentArt.flv.destroy(); currentArt.flv = null; }
-                    });
+                    video._mpegts = player;
 
                     video._reParseCount = 0;
                     let lastTime = -1, stallCount = 0;
                     video._stallTimer = setInterval(() => {
-                        if (video._playerId !== playerId || !currentArt || !video) {
+                        if (video._playerId !== playerId || !art || !video) {
                             clearInterval(video._stallTimer); video._stallTimer = null; return;
                         }
                         const ct = video.currentTime;
@@ -993,22 +931,15 @@
                     });
 
                     player.on(mpegts.Events.ERROR, (errType, errDetail) => {
-                        if (currentArt.flv !== player) return;
+                        if (video._mpegts !== player) return;
                         console.warn('[flv] 错误:', errType, errDetail);
                         clearInterval(video._stallTimer); video._stallTimer = null;
                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1500);
                     });
                 },
                 m3u8: function(video, url) {
-                    const currentArt = art || this;
-                    // 销毁旧实例
-                    if (currentArt && currentArt.hls) {
-                        console.log('[内存控制] 销毁旧 HLS 实例');
-                        try { currentArt.hls.destroy(); } catch(e){}
-                        currentArt.hls = null;
-                    }
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
-                    
+                    if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
@@ -1018,28 +949,18 @@
 
                     const startHls = (srcUrl) => {
                         if (video._hlsId !== hlsId) return;
+                        if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
                         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                            // 创建新 HLS 播放器，添加了严格的缓冲硬上限
                             const hls = new Hls({
                                 liveSyncDurationCount: 2,
                                 liveMaxLatencyDurationCount: 5,
                                 lowLatencyMode: true,
-                                maxBufferLength: 15,            // 最大前向缓冲时间15秒
-                                maxMaxBufferLength: 20,         // 最大上限时间20秒
-                                maxBufferSize: 80 * 1000 * 1000 // 【核心修复】硬性内存限制：80MB
+                                maxBufferLength: 8,
+                                maxMaxBufferLength: 16
                             });
-                            
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
-                            
-                            if (currentArt) currentArt.hls = hls;
-                            window._hlsInst = hls;
-
-                            currentArt.on('destroy', () => {
-                                if (currentArt.hls) { currentArt.hls.destroy(); currentArt.hls = null; }
-                            });
-
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
@@ -1060,7 +981,6 @@
                                         data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
                                         console.warn('[hls] manifest 加载失败，重新解析直播流');
                                         hls.destroy(); window._hlsInst = null;
-                                        if (currentArt) currentArt.hls = null;
                                         if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                         else showOfflineOverlay(currentAnchorName);
@@ -1077,7 +997,6 @@
                                     } else {
                                         console.warn('[hls] 多次网络错误，重新解析直播流');
                                         hls.destroy(); window._hlsInst = null;
-                                        if (currentArt) currentArt.hls = null;
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                         else showOfflineOverlay(currentAnchorName);
                                     }
@@ -1086,10 +1005,10 @@
                                     setTimeout(() => { video.play().catch(() => {}); }, 500);
                                 } else {
                                     hls.destroy(); window._hlsInst = null;
-                                    if (currentArt) currentArt.hls = null;
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                 }
                             });
+                            window._hlsInst = hls;
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                             video.src = srcUrl;
                             video.play();
@@ -1102,13 +1021,13 @@
 
                     let lastTime = -1, stallCount = 0;
                     video._hlsStallTimer = setInterval(() => {
-                        if (video._hlsId !== hlsId || !currentArt || !video) {
+                        if (video._hlsId !== hlsId || !art || !video) {
                             clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; return;
                         }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
-                            if (stallCount >= 4) {  
+                            if (stallCount >= 4) {
                                 clearInterval(video._hlsStallTimer); video._hlsStallTimer = null;
                                 video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
                                 if (video._hlsReParseCount <= 3) {
@@ -1259,12 +1178,12 @@
                 icon.textContent = danmakuEnabled ? '🔊' : '🔇';
                 icon.title = danmakuEnabled ? '关闭弹幕' : '开启弹幕';
                 if (!danmakuEnabled) {
-                    currentDanmakuRoom = ''; 
+                    currentDanmakuRoom = '';
                     if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
                     if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
                     if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
                 } else {
-                    currentDanmakuRoom = lastRoomUrl; 
+                    currentDanmakuRoom = lastRoomUrl;
                     if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
                         const roomId = lastRoomUrl.split('/').pop().split('?')[0];
                         startDouyuDanmaku(roomId);
