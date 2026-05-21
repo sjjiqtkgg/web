@@ -778,9 +778,11 @@
     // ==================== 代理判定：只给国外平台加代理 ====================
     const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
-    function getProxyUrl(originalUrl) {
+    function getProxyUrl(originalUrl, forceBackend) {
         // 已经是 CF Worker 地址，直接返回，避免双重包装
         if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
+        // 已经是后端代理地址，直接返回
+        if (originalUrl.startsWith(API_BASE + '/api/proxy')) return originalUrl;
 
         const NEED_PROXY = [
             'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
@@ -791,13 +793,18 @@
         const shouldProxy = currentPlatform === 'PandaTV'
             || NEED_PROXY.some(domain => originalUrl.includes(domain));
         if (shouldProxy) {
+            // PandaLive 的 master m3u8 必须走后端代理（外网代理池）
+            // 因为 CF Worker 的出口节点地区不符合 PandaLive CDN 的鉴权要求（522）
+            // TS 片段由 worker.js 内部重写，不会再进入这里
+            if (forceBackend || currentPlatform === 'PandaTV') {
+                const referer = 'https://www.pandalive.co.kr/';
+                return `${API_BASE}/api/proxy?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+            }
             let referer = 'https://play.sooplive.com';  // 默认 SOOP
             if (currentPlatform === 'Twitch') {
                 referer = 'https://player.twitch.tv';
-            } else if (currentPlatform === 'PandaTV') {
-                referer = 'https://www.pandalive.co.kr/';
             }
-            // 走 CF Worker，不经过 Render 后端
+            // Twitch/SOOP 走 CF Worker，不经过 Render 后端
             return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
         }
         return originalUrl;
