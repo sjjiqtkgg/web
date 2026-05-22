@@ -870,7 +870,7 @@
                 const cdnLower = s.cdn.toLowerCase();
                 // 排除 source，寻找 720p 或 1080p
                 if (cdnLower.includes('source')) return false;
-                return cdnLower.includes('720') || cdnLower.includes('1080');
+                return cdnLower.includes('1080') || cdnLower.includes('720');
             });
             
             if (safeIndex !== -1) {
