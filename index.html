@@ -5,12 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
     <title>聚合直播 - 全平台版</title>
-    <!-- 第1处修改：CSS 使用 fastly.jsdelivr.net -->
-    <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/artplayer/dist/artplayer.css">
-    <!-- 第2处修改：Sortable 使用 fastly.jsdelivr.net -->
-    <script src="https://fastly.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <!-- 第3处修改：HLS.js 使用 fastly.jsdelivr.net -->
-    <script src="https://fastly.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js"></script>
+    <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -127,10 +124,8 @@
     </div>
 </div>
 
-<!-- 第4处修改：mpegts.js 使用 fastly.jsdelivr.net -->
-<script src="https://fastly.jsdelivr.net/npm/mpegts.js@latest/dist/mpegts.min.js"></script>
-<!-- 第5处修改：artplayer.js 使用 fastly.jsdelivr.net -->
-<script src="https://fastly.jsdelivr.net/npm/artplayer/dist/artplayer.js"></script>
+<script src="https://registry.npmmirror.com/mpegts.js/1/files/dist/mpegts.js"></script>
+<script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
     // 全局静默 mpegts.js 内部已知且无害的 Worker 销毁报错
@@ -824,7 +819,6 @@
                 }
             } catch(e) {
                 logStatus('❌ ' + e.message);
-                // 网络错误自动重试
                 if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
                     if (!window._networkRetryCount) window._networkRetryCount = 0;
                     if (window._networkRetryCount < 2) {
@@ -854,7 +848,6 @@
 
         updatePageTitle(currentAnchorName, currentPlatform);
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
-        // 重置网络重试计数
         window._networkRetryCount = 0;
         playStream(streams);
         setBtn(false);
@@ -869,12 +862,12 @@
         let defaultIndex = 0;
         if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
             const safeIndex = streams.findIndex(s => 
-                s.cdn && (s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('1080') || s.cdn.toLowerCase().includes('high'))
+                s.cdn && (s.cdn.toLowerCase().includes('1080') || s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('high'))
             );
             if (safeIndex !== -1) {
                 defaultIndex = safeIndex;
             } else if (streams.length > 1) {
-                defaultIndex = 1;
+                defaultIndex = 1; // 避开 source
             }
         }
 
