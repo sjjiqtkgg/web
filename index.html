@@ -860,11 +860,33 @@
         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
         document.getElementById('player').innerHTML = '';
 
-        const s0 = streams[0];
-        const artType = s0.type === 'flv' ? 'flv' : (s0.type === 'm3u8' ? 'm3u8' : '');
+        // === 【核心新增】Twitch 默认画质智能降级逻辑 ===
+        let defaultIndex = 0;
+        if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
+            // 优先寻找名字里带有 '1080p' (非 source), '720p', 或 'high' 的安全画质
+            // 因为 Twitch 的选项格式通常是 "Twitch-1280p720" 或 "Twitch-source"
+            const safeIndex = streams.findIndex(s => {
+                if (!s.cdn) return false;
+                const cdnLower = s.cdn.toLowerCase();
+                // 排除 source，寻找 720p 或 1080p
+                if (cdnLower.includes('source')) return false;
+                return cdnLower.includes('720') || cdnLower.includes('1080');
+            });
+            
+            if (safeIndex !== -1) {
+                defaultIndex = safeIndex; 
+            } else if (streams.length > 1) {
+                // 如果实在没找到 720/1080，但选项大于1个，默认选第2个（硬躲开第1个原画）
+                defaultIndex = 1; 
+            }
+        }
+        // ==============================================
+
+        const sDefault = streams[defaultIndex] || streams[0];
+        const artType = sDefault.type === 'flv' ? 'flv' : (sDefault.type === 'm3u8' ? 'm3u8' : '');
 
         const qualityList = streams.map((s, i) => ({
-            default: i === 0,
+            default: i === defaultIndex, // 根据智能判断设置默认高亮项
             html: s.cdn,
             url: getProxyUrl(s.url),
             type: s.type || ''
@@ -872,7 +894,7 @@
 
         art = new Artplayer({
             container: '#player',
-            url: getProxyUrl(s0.url),
+            url: getProxyUrl(sDefault.url), // 使用安全的默认地址启动
             type: artType,
             isLive: true,
             autoplay: true,
