@@ -137,13 +137,6 @@
         }
     }, true);
 
-    window.addEventListener('unhandledrejection', (e) => {
-        if (e.reason && e.reason.name === 'AbortError') {
-            e.preventDefault();
-            return false;
-        }
-    });
-
     const API_BASE = 'https://live1-cxe9.onrender.com';
 
     let art = null;
@@ -788,12 +781,6 @@
 
     async function goWithUrl(raw) {
         if (!raw) return;
-
-        if (window._loadingRoom === raw) {
-            console.log('[播放器] 已在加载当前房间，跳过');
-            return;
-        }
-        window._loadingRoom = raw;
         setBtn(true);
         logStatus('处理中…');
         currentChatList = [];
@@ -862,7 +849,6 @@
         updatePageTitle(currentAnchorName, currentPlatform);
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
         window._networkRetryCount = 0;
-        window._loadingRoom = null;
         playStream(streams);
         setBtn(false);
     }
@@ -876,7 +862,7 @@
         let defaultIndex = 0;
         if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
             const safeIndex = streams.findIndex(s => 
-                s.cdn && (s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('1080') || s.cdn.toLowerCase().includes('high'))
+                s.cdn && (s.cdn.toLowerCase().includes('1080') || s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('high'))
             );
             if (safeIndex !== -1) {
                 defaultIndex = safeIndex;
@@ -1012,11 +998,6 @@
                     video._hlsReParseCount = 0;
 
                     const startHls = (srcUrl) => {
-                        if (video._startingHls) {
-                            console.warn('[HLS] 正在初始化，跳过重复启动');
-                            return;
-                        }
-                        video._startingHls = true;
                         if (video._hlsId !== hlsId) return;
                         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
@@ -1031,18 +1012,7 @@
                             });
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
-                            hls.on(Hls.Events.MANIFEST_PARSED, async () => {
-                                try {
-                                    video._startingHls = false;
-                                    if (video.readyState >= 0) {
-                                        await video.play();
-                                    }
-                                } catch (err) {
-                                    if (err?.name !== 'AbortError') {
-                                        console.error('[HLS play]', err);
-                                    }
-                                }
-                            });
+                            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
                                 if (!data.fatal) {
@@ -1051,9 +1021,7 @@
                                         console.warn('[hls] 缓冲卡住，跳到最新位置');
                                         try {
                                             if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
-                                            video.play().catch(err => {
-                                            if (err?.name !== 'AbortError') console.error(err);
-                                        });
+                                            video.play().catch(() => {});
                                         } catch(e) {}
                                     }
                                     return;
@@ -1073,9 +1041,7 @@
                                     if (video._hlsReParseCount <= 2) {
                                         console.warn(`[hls] 网络错误，尝试 startLoad 恢复（第${video._hlsReParseCount}次）`);
                                         setTimeout(() => {
-                                            try { hls.startLoad(); video.play().catch(err => {
-                                            if (err?.name !== 'AbortError') console.error(err);
-                                        }); } catch(e) {
+                                            try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {
                                                 if (lastRoomUrl) goWithUrl(lastRoomUrl);
                                             }
                                         }, 2000);
@@ -1087,9 +1053,7 @@
                                     }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                                     hls.recoverMediaError();
-                                    setTimeout(() => { video.play().catch(err => {
-                                            if (err?.name !== 'AbortError') console.error(err);
-                                        }); }, 500);
+                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
                                 } else {
                                     hls.destroy(); window._hlsInst = null;
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
@@ -1098,11 +1062,7 @@
                             window._hlsInst = hls;
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                             video.src = srcUrl;
-                            video.play().catch(err => {
-                                if (err?.name !== 'AbortError') {
-                                    console.error('[Native HLS play]', err);
-                                }
-                            });
+                            video.play();
                         } else {
                             console.error('浏览器不支持 HLS 播放');
                         }
@@ -1191,9 +1151,7 @@
                     const livePos = window._hlsInst.liveSyncPosition;
                     if (livePos && Math.abs(video.currentTime - livePos) > 3) {
                         video.currentTime = livePos;
-                        video.play().catch(err => {
-                                            if (err?.name !== 'AbortError') console.error(err);
-                                        });
+                        video.play().catch(() => {});
                     }
                 } catch(e) {}
             }
