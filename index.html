@@ -137,6 +137,14 @@
         }
     }, true);
 
+    // 修改8：全局捕获未处理的 AbortError Promise 拒绝
+    window.addEventListener('unhandledrejection', e => {
+        if (e.reason && e.reason.name === 'AbortError') {
+            e.preventDefault();
+            return false;
+        }
+    });
+
     const API_BASE = 'https://live1-cxe9.onrender.com';
 
     let art = null;
@@ -781,6 +789,14 @@
 
     async function goWithUrl(raw) {
         if (!raw) return;
+
+        // 修改7：防止同一房间重复加载
+        if (window._loadingRoom === raw) {
+            console.log('[播放器] 已在加载当前房间，跳过');
+            return;
+        }
+        window._loadingRoom = raw;
+
         setBtn(true);
         logStatus('处理中…');
         currentChatList = [];
@@ -815,6 +831,7 @@
                     logStatus('📴 ' + currentAnchorName + ' 暂未开播');
                     showOfflineOverlay(currentAnchorName);
                     setBtn(false);
+                    window._loadingRoom = null; // 修改7：退出时清除锁
                     return;
                 }
             } catch(e) {
@@ -826,10 +843,12 @@
                         logStatus(`网络抖动，${window._networkRetryCount * 2}秒后自动重试...`);
                         setBtn(true);
                         setTimeout(() => goWithUrl(raw), window._networkRetryCount * 2000);
+                        window._loadingRoom = null; // 修改7：重试前释放锁，否则下次无法进入
                         return;
                     }
                 }
                 window._networkRetryCount = 0;
+                window._loadingRoom = null; // 修改7：错误退出时清除锁
                 setBtn(false);
                 return;
             }
@@ -842,6 +861,7 @@
             dmConfig = null;
         } else {
             logStatus('❌ 不支持的链接，请提供直播间地址或直链');
+            window._loadingRoom = null; // 修改7：退出时清除锁
             setBtn(false);
             return;
         }
@@ -850,6 +870,8 @@
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
         window._networkRetryCount = 0;
         playStream(streams);
+        // 修改7：播放成功后清除锁
+        window._loadingRoom = null;
         setBtn(false);
     }
 
@@ -998,7 +1020,17 @@
                     video._hlsReParseCount = 0;
 
                     const startHls = (srcUrl) => {
-                        if (video._hlsId !== hlsId) return;
+                        // 修改6：增加启动锁，防止并发初始化
+                        if (video._startingHls) {
+                            console.warn('[HLS] 正在初始化，跳过重复启动');
+                            return;
+                        }
+                        video._startingHls = true;
+
+                        if (video._hlsId !== hlsId) {
+                            video._startingHls = false;
+                            return;
+                        }
                         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
                         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
@@ -1012,7 +1044,16 @@
                             });
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
-                            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                            hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+                                video._startingHls = false; // 修改6：成功时释放锁
+                                try {
+                                    await video.play();
+                                } catch (err) {
+                                    if (err.name !== 'AbortError') {
+                                        console.error(err);
+                                    }
+                                }
+                            });
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
                                 if (!data.fatal) {
@@ -1021,7 +1062,12 @@
                                         console.warn('[hls] 缓冲卡住，跳到最新位置');
                                         try {
                                             if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
-                                            video.play().catch(() => {});
+                                            // 修改4：忽略 AbortError
+                                            video.play().catch(err => {
+                                                if (err?.name !== 'AbortError') {
+                                                    console.error(err);
+                                                }
+                                            });
                                         } catch(e) {}
                                     }
                                     return;
@@ -1032,6 +1078,7 @@
                                         data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
                                         console.warn('[hls] manifest 加载失败，重新解析');
                                         hls.destroy(); window._hlsInst = null;
+                                        video._startingHls = false; // 修改6：错误时释放锁
                                         if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                         else showOfflineOverlay(currentAnchorName);
@@ -1041,30 +1088,53 @@
                                     if (video._hlsReParseCount <= 2) {
                                         console.warn(`[hls] 网络错误，尝试 startLoad 恢复（第${video._hlsReParseCount}次）`);
                                         setTimeout(() => {
-                                            try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {
+                                            try {
+                                                hls.startLoad();
+                                                // 修改5：忽略 AbortError
+                                                video.play().catch(err => {
+                                                    if (err?.name !== 'AbortError') {
+                                                        console.error(err);
+                                                    }
+                                                });
+                                            } catch(e) {
+                                                video._startingHls = false; // 修改6：错误时释放锁
                                                 if (lastRoomUrl) goWithUrl(lastRoomUrl);
                                             }
                                         }, 2000);
                                     } else {
                                         console.warn('[hls] 多次网络错误，重新解析');
                                         hls.destroy(); window._hlsInst = null;
+                                        video._startingHls = false; // 修改6：错误时释放锁
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                         else showOfflineOverlay(currentAnchorName);
                                     }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                                     hls.recoverMediaError();
-                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
+                                    setTimeout(() => {
+                                        video.play().catch(err => {
+                                            if (err?.name !== 'AbortError') {
+                                                console.error(err);
+                                            }
+                                        });
+                                    }, 500);
                                 } else {
                                     hls.destroy(); window._hlsInst = null;
+                                    video._startingHls = false; // 修改6：错误时释放锁
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                 }
                             });
                             window._hlsInst = hls;
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                             video.src = srcUrl;
-                            video.play();
+                            video.play().catch(err => {
+                                if (err.name !== 'AbortError') {
+                                    console.error(err);
+                                }
+                            });
+                            video._startingHls = false; // 修改6：Safari分支也释放锁
                         } else {
                             console.error('浏览器不支持 HLS 播放');
+                            video._startingHls = false; // 修改6：错误时释放锁
                         }
                     };
 
@@ -1073,21 +1143,25 @@
                     let lastTime = -1, stallCount = 0;
                     video._hlsStallTimer = setInterval(() => {
                         if (video._hlsId !== hlsId || !art || !video) {
-                            clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; return;
+                            clearInterval(video._hlsStallTimer); video._hlsStallTimer = null;
+                            // 修改6：清理定时器时如果还在初始化，也应释放锁
+                            video._startingHls = false;
+                            return;
                         }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
                             if (stallCount >= 4) {
                                 clearInterval(video._hlsStallTimer); video._hlsStallTimer = null;
-                                video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
-                                if (video._hlsReParseCount <= 3) {
-                                    console.warn(`[hls] 卡顿超时，重新解析（第${video._hlsReParseCount}次）`);
+                                video._reParseCount = (video._reParseCount || 0) + 1;
+                                if (video._reParseCount <= 3) {
+                                    console.warn(`[hls] 卡顿超时，重新解析（第${video._reParseCount}次）`);
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
                                 } else {
                                     console.warn('[hls] 多次重试失败，判定主播已下播');
                                     showOfflineOverlay(currentAnchorName);
                                 }
+                                video._startingHls = false; // 修改6：重解析前释放锁
                             }
                         } else { stallCount = 0; }
                         lastTime = ct;
@@ -1096,7 +1170,6 @@
             }
         });
 
-        // 【关键修复】使用 art.quality 动态获取当前流信息，不再依赖 s0
         art.on('ready', () => {
             const activeQuality = art.quality || (art.qualityList && art.qualityList[0]);
             if (activeQuality) {
@@ -1142,6 +1215,7 @@
         });
     }
 
+    // 修改3：visibilitychange 中也忽略 AbortError
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && art) {
             const video = art.video;
@@ -1151,7 +1225,11 @@
                     const livePos = window._hlsInst.liveSyncPosition;
                     if (livePos && Math.abs(video.currentTime - livePos) > 3) {
                         video.currentTime = livePos;
-                        video.play().catch(() => {});
+                        video.play().catch(err => {
+                            if (err?.name !== 'AbortError') {
+                                console.error(err);
+                            }
+                        });
                     }
                 } catch(e) {}
             }
