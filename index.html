@@ -128,6 +128,15 @@
 <script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
+    // 全局静默 mpegts.js 内部已知且无害的 Worker 销毁报错
+    window.addEventListener('error', (e) => {
+        if (e.message && e.message.includes('SourceBuffer has been removed')) {
+            e.preventDefault();
+            e.stopPropagation();
+            return false;
+        }
+    }, true);
+
     const API_BASE = 'https://live1-cxe9.onrender.com';
 
     let art = null;
@@ -144,7 +153,6 @@
     let dmWs = null;
     let douyinWs = null;
     let twitchWs = null;
-    
     let currentDanmakuRoom = '';
 
     let douyuConnecting = false;
@@ -162,7 +170,6 @@
     const HISTORY_MAX = 100;
 
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
-    // 关注上限调整为 100
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
     function getSoopCookie() { try { return localStorage.getItem('ps_soop_cookie') || ''; } catch(e) { return ''; } }
@@ -812,6 +819,18 @@
                 }
             } catch(e) {
                 logStatus('❌ ' + e.message);
+                // 网络错误自动重试
+                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+                    if (!window._networkRetryCount) window._networkRetryCount = 0;
+                    if (window._networkRetryCount < 2) {
+                        window._networkRetryCount++;
+                        logStatus(`网络抖动，${window._networkRetryCount * 2}秒后自动重试...`);
+                        setBtn(true);
+                        setTimeout(() => goWithUrl(raw), window._networkRetryCount * 2000);
+                        return;
+                    }
+                }
+                window._networkRetryCount = 0;
                 setBtn(false);
                 return;
             }
@@ -830,6 +849,8 @@
 
         updatePageTitle(currentAnchorName, currentPlatform);
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
+        // 重置网络重试计数
+        window._networkRetryCount = 0;
         playStream(streams);
         setBtn(false);
     }
@@ -868,11 +889,21 @@
             customType: {
                 flv: function(video, url) {
                     if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
+                    
                     if (video._mpegts) {
                         const oldPlayer = video._mpegts;
                         video._mpegts = null;
-                        try { oldPlayer.unload(); oldPlayer.detachMediaElement(); oldPlayer.destroy(); } catch(e){}
+                        try { 
+                            oldPlayer.pause();
+                            oldPlayer.unload(); 
+                            oldPlayer.detachMediaElement(); 
+                            oldPlayer.destroy();
+                            oldPlayer._mediaSource = null;
+                            oldPlayer._msStream = null;
+                            if (oldPlayer._ms) oldPlayer._ms = null;
+                        } catch(e){}
                     }
+
                     video._playerIdCounter = (video._playerIdCounter || 0) + 1;
                     const playerId = video._playerIdCounter;
                     video._playerId = playerId;
@@ -939,7 +970,15 @@
                 },
                 m3u8: function(video, url) {
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
-                    if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
+                    if (video._mpegts) { 
+                        try { 
+                            video._mpegts.unload(); 
+                            video._mpegts.detachMediaElement(); 
+                            video._mpegts.destroy(); 
+                            video._mpegts._mediaSource = null;
+                        } catch(e){} 
+                        video._mpegts = null; 
+                    }
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
@@ -957,7 +996,8 @@
                                 liveMaxLatencyDurationCount: 5,
                                 lowLatencyMode: true,
                                 maxBufferLength: 8,
-                                maxMaxBufferLength: 16
+                                maxMaxBufferLength: 16,
+                                maxBufferSize: 80 * 1000 * 1000
                             });
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
@@ -979,7 +1019,7 @@
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                                     if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
                                         data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                                        console.warn('[hls] manifest 加载失败，重新解析直播流');
+                                        console.warn('[hls] manifest 加载失败，重新解析');
                                         hls.destroy(); window._hlsInst = null;
                                         if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
@@ -995,7 +1035,7 @@
                                             }
                                         }, 2000);
                                     } else {
-                                        console.warn('[hls] 多次网络错误，重新解析直播流');
+                                        console.warn('[hls] 多次网络错误，重新解析');
                                         hls.destroy(); window._hlsInst = null;
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
                                         else showOfflineOverlay(currentAnchorName);
@@ -1053,7 +1093,6 @@
                 console.log('[弹幕] 当前房间弹幕已连接，跳过重复初始化');
                 return;
             }
-
             currentDanmakuRoom = lastRoomUrl;
 
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
