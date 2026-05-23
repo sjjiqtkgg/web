@@ -844,7 +844,19 @@
         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
         document.getElementById('player').innerHTML = '';
 
-        const defaultIndex = 0;
+        // === 恢复 Twitch 默认画质智能降级（不选 source） ===
+        let defaultIndex = 0;
+        if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
+            const safeIndex = streams.findIndex(s => 
+                s.cdn && (s.cdn.toLowerCase().includes('1080') || s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('high'))
+            );
+            if (safeIndex !== -1) {
+                defaultIndex = safeIndex;
+            } else if (streams.length > 1) {
+                defaultIndex = 1; // 避开 source
+            }
+        }
+
         const sDefault = streams[defaultIndex] || streams[0];
         const artType = sDefault.type === 'flv' ? 'flv' : (sDefault.type === 'm3u8' ? 'm3u8' : '');
 
@@ -982,7 +994,16 @@
                             });
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
-                            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                            // === 修复 MANIFEST_PARSED 的 AbortError ===
+                            hls.on(Hls.Events.MANIFEST_PARSED, async () => {
+                                try {
+                                    await video.play();
+                                } catch (err) {
+                                    if (err.name !== 'AbortError') {
+                                        console.error(err);
+                                    }
+                                }
+                            });
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
                                 if (!data.fatal) {
@@ -990,7 +1011,12 @@
                                         data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
                                         try {
                                             if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
-                                            video.play().catch(() => {});
+                                            // 修复 AbortError
+                                            video.play().catch(err => {
+                                                if (err.name !== 'AbortError') {
+                                                    console.error(err);
+                                                }
+                                            });
                                         } catch(e) {}
                                     }
                                     return;
@@ -1000,7 +1026,12 @@
                                         data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
                                         hls.currentLevel = -1;
                                         hls.startLoad();
-                                        video.play().catch(() => {});
+                                        // 修复 AbortError
+                                        video.play().catch(err => {
+                                            if (err.name !== 'AbortError') {
+                                                console.error(err);
+                                            }
+                                        });
                                         return;
                                     }
                                     if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
@@ -1014,7 +1045,14 @@
                                     video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
                                     if (video._hlsReParseCount <= 2) {
                                         setTimeout(() => {
-                                            try { hls.startLoad(); video.play().catch(() => {}); } catch(e) {
+                                            try { hls.startLoad(); 
+                                                // 修复 AbortError
+                                                video.play().catch(err => {
+                                                    if (err.name !== 'AbortError') {
+                                                        console.error(err);
+                                                    }
+                                                });
+                                            } catch(e) {
                                                 if (lastRoomUrl) goWithUrl(lastRoomUrl);
                                             }
                                         }, 2000);
@@ -1025,7 +1063,14 @@
                                     }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                                     hls.recoverMediaError();
-                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
+                                    setTimeout(() => {
+                                        // 修复 AbortError
+                                        video.play().catch(err => {
+                                            if (err.name !== 'AbortError') {
+                                                console.error(err);
+                                            }
+                                        });
+                                    }, 500);
                                 } else {
                                     hls.destroy(); window._hlsInst = null;
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
@@ -1034,7 +1079,12 @@
                             window._hlsInst = hls;
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                             video.src = srcUrl;
-                            video.play();
+                            // 修复 Safari 分支 AbortError
+                            video.play().catch(err => {
+                                if (err.name !== 'AbortError') {
+                                    console.error(err);
+                                }
+                            });
                         }
                     };
 
@@ -1110,7 +1160,12 @@
                     const livePos = window._hlsInst.liveSyncPosition;
                     if (livePos && Math.abs(video.currentTime - livePos) > 3) {
                         video.currentTime = livePos;
-                        video.play().catch(() => {});
+                        // 修复 AbortError
+                        video.play().catch(err => {
+                            if (err.name !== 'AbortError') {
+                                console.error(err);
+                            }
+                        });
                     }
                 } catch(e) {}
             }
