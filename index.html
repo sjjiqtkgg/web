@@ -753,28 +753,21 @@
     const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function getProxyUrl(originalUrl) {
-    // 1. 如果已经是后端/CF代理地址，直接返回，防止死循环
-    if (originalUrl.startsWith(API_BASE + '/api/proxy')) return originalUrl;
-    if (originalUrl.startsWith("https://aged-water-fc43.byronfuller5566.workers.dev")) return originalUrl;
-
-    // 2. Twitch 专属：放行原始 URL，交给前端 + 本地 Throne 代理直连
-    if (originalUrl.includes('ttvnw.net') || originalUrl.includes('live-video.net') || originalUrl.includes('twitch.tv')) {
-        console.log('[分流器] Twitch 流量：放行纯前端直连（走本地 Throne）');
-        return originalUrl; 
-    }
-
-    // 3. PandaTV 和 SoopLive：必须走 CF Worker 中转洗白请求头
-    if (originalUrl.includes('sooplive.com') || originalUrl.includes('sooplive.net') || currentPlatform === 'PandaTV') {
-        const cfWorker = "https://aged-water-fc43.byronfuller5566.workers.dev";
-        let referer = 'https://play.sooplive.com';
-        if (currentPlatform === 'PandaTV') referer = 'https://www.pandalive.co.kr/';
-        
-        console.log('[分流器] 防盗链平台：交给 CF Worker 中转');
-        return `${cfWorker}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
-    }
-
-    // 4. 国内平台（抖音、虎牙、B站等）默认返回原始 URL
-    return originalUrl;
+        if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
+        const NEED_PROXY = [
+            'ttvnw.net', 'twitch.tv', 'twitchsvc.net',
+            'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com',
+            'pandalive.co.kr', 'pandalivecdn.com'
+        ];
+        const shouldProxy = currentPlatform === 'PandaTV'
+            || NEED_PROXY.some(domain => originalUrl.includes(domain));
+        if (shouldProxy) {
+            let referer = 'https://play.sooplive.com';
+            if (currentPlatform === 'Twitch') referer = 'https://player.twitch.tv';
+            else if (currentPlatform === 'PandaTV') referer = 'https://www.pandalive.co.kr/';
+            return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+        }
+        return originalUrl;
     }
 
     async function goWithUrl(raw) {
