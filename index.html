@@ -844,7 +844,7 @@
         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
         document.getElementById('player').innerHTML = '';
 
-        // === 智能默认画质选择（仅 Twitch 需要降级，国内平台默认最高清） ===
+        // === 智能默认画质选择 ===
         let defaultIndex = 0;
         if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
             let safeIndex = streams.findIndex(s => s.cdn && s.cdn.toLowerCase().includes('1080'));
@@ -997,8 +997,18 @@
                             hls.loadSource(srcUrl);
                             hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+                            
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
+
+                                // --- 【新增：广告空列表拦截】 ---
+                                // 无论 fatal 与否，只要是因为播放列表空（被 Worker 剥除），就在此拦截并静默等待。
+                                if (data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || data.details === 'levelEmptyError') {
+                                    console.warn('[hls] 播放列表为空(可能处于去广告期间)，hls.js 正在静默轮询等待恢复...');
+                                    return; 
+                                }
+                                // ------------------------------
+
                                 if (!data.fatal) {
                                     if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
                                         data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
@@ -1009,9 +1019,9 @@
                                     }
                                     return;
                                 }
+                                
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                                    if (data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || 
-                                        data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
+                                    if (data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
                                         hls.currentLevel = -1;
                                         hls.startLoad();
                                         video.play().catch(() => {});
