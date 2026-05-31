@@ -386,7 +386,7 @@
         }, 6000);
     }
 
-    // 增强版关注状态刷新，包含开播弹窗提示
+    // 增强版关注状态刷新，包含开播弹窗提示（已去除首次刷新限制）
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
@@ -415,16 +415,13 @@
         _saveFollows(items);
         renderFollowList();
 
-        if (window._hasInitialRefresh) {
-            items.forEach(item => {
-                const prev = beforeStatus[item.url];
-                if (prev && prev !== 'online' && item.status === 'online') {
-                    showPageToast(item.platform, item.name, item.avatar, item.url);
-                }
-            });
-        } else {
-            window._hasInitialRefresh = true;
-        }
+        // 直接检测状态变化并弹窗，不再区分首次/后续刷新
+        items.forEach(item => {
+            const prev = beforeStatus[item.url];
+            if (prev && prev !== 'online' && item.status === 'online') {
+                showPageToast(item.platform, item.name, item.avatar, item.url);
+            }
+        });
     }
 
     function startDouyuDanmaku(roomId) {
@@ -1378,8 +1375,6 @@
     window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
 
     function init() {
-        window._hasInitialRefresh = false; // 首次刷新标记，避免页面加载时弹出提示
-
         chatMessagesDiv = document.getElementById('chat-messages');
         followListDiv = document.getElementById('follow-list');
         historyListDiv = document.getElementById('history-list');
