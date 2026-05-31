@@ -313,9 +313,15 @@
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
+    // 增强版关注状态刷新，包含开播通知
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
+
+        // 保存刷新前的状态快照
+        const beforeStatus = {};
+        items.forEach(item => { beforeStatus[item.url] = item.status; });
+
         await Promise.all(items.map(async (item) => {
             try {
                 const _sc1 = item.url.includes('sooplive.com') ? getSoopCookie() : '';
@@ -329,12 +335,36 @@
                 if (d.error) { item.status = 'error'; }
                 else if (d.streams && d.streams.length) {
                     item.status = 'online';
-                if (d.avatar) item.avatar = d.avatar;
+                    if (d.avatar) item.avatar = d.avatar;
                 } else { item.status = 'offline'; }
             } catch(e) { item.status = 'error'; }
         }));
+
         _saveFollows(items);
         renderFollowList();
+
+        // 检测新开播并发送通知（跳过首次刷新）
+        if (window._hasInitialRefresh) {
+            items.forEach(item => {
+                const prev = beforeStatus[item.url];
+                if (prev && prev !== 'online' && item.status === 'online') {
+                    if (window.Notification && Notification.permission === 'granted') {
+                        const notif = new Notification(`${item.platform || ''} ${item.name || ''} 开播了！`, {
+                            body: '点击观看直播',
+                            icon: item.avatar || '',
+                            tag: item.url
+                        });
+                        notif.onclick = () => {
+                            window.focus();
+                            document.getElementById('url').value = item.url;
+                            window.go();
+                        };
+                    }
+                }
+            });
+        } else {
+            window._hasInitialRefresh = true;
+        }
     }
 
     function startDouyuDanmaku(roomId) {
@@ -1288,6 +1318,12 @@
     window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
 
     function init() {
+        // 请求浏览器通知权限
+        if (window.Notification && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+            Notification.requestPermission();
+        }
+        window._hasInitialRefresh = false; // 首次刷新标记，防止页面加载时弹出所有通知
+
         chatMessagesDiv = document.getElementById('chat-messages');
         followListDiv = document.getElementById('follow-list');
         historyListDiv = document.getElementById('history-list');
