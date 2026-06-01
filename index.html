@@ -1062,6 +1062,7 @@
                         video._mpegts = null; 
                     }
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
+                    if (video._fragmentCheckTimer) { clearInterval(video._fragmentCheckTimer); video._fragmentCheckTimer = null; }
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
                     const hlsId = video._hlsIdCounter;
@@ -1166,6 +1167,35 @@
                     };
 
                     startHls(url);
+
+                    // ===== 无新分片超时检测（防止死循环最后一帧） =====
+                    if (window._hlsInst && video._hlsId === hlsId) {
+                        const hls = window._hlsInst;
+                        video._lastFragmentTime = Date.now();
+                        hls.on(Hls.Events.FRAG_BUFFERED, () => {
+                            video._lastFragmentTime = Date.now();
+                        });
+                        video._fragmentCheckTimer = setInterval(() => {
+                            if (video._hlsId !== hlsId || !art || !video) {
+                                clearInterval(video._fragmentCheckTimer);
+                                video._fragmentCheckTimer = null;
+                                return;
+                            }
+                            const elapsed = Date.now() - (video._lastFragmentTime || 0);
+                            if (elapsed > 15000) { // 15秒无新分片
+                                clearInterval(video._fragmentCheckTimer);
+                                video._fragmentCheckTimer = null;
+                                console.log('[下播检测] 超过15秒无新分片，判定为下播');
+                                showOfflineOverlay(currentAnchorName);
+                                if (window._hlsInst) {
+                                    try { window._hlsInst.stopLoad(); } catch(e) {}
+                                }
+                                if (video) {
+                                    try { video.pause(); } catch(e) {}
+                                }
+                            }
+                        }, 5000);
+                    }
 
                     let lastTime = -1, stallCount = 0;
                     video._hlsStallTimer = setInterval(() => {
