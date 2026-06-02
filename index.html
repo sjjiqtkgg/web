@@ -1168,31 +1168,43 @@
 
                     startHls(url);
 
-                    // ===== 无新分片超时检测（防止死循环最后一帧） =====
+                    // ===== 无新分片超时检测（放宽至 90 秒，且结合 currentTime 变化判断） =====
                     if (window._hlsInst && video._hlsId === hlsId) {
                         const hls = window._hlsInst;
                         video._lastFragmentTime = Date.now();
+                        video._lastCheckTime = video.currentTime; // 记录检查时的进度
+
                         hls.on(Hls.Events.FRAG_BUFFERED, () => {
                             video._lastFragmentTime = Date.now();
+                            video._lastCheckTime = video.currentTime;
                         });
+
                         video._fragmentCheckTimer = setInterval(() => {
                             if (video._hlsId !== hlsId || !art || !video) {
                                 clearInterval(video._fragmentCheckTimer);
                                 video._fragmentCheckTimer = null;
                                 return;
                             }
-                            const elapsed = Date.now() - (video._lastFragmentTime || 0);
-                            if (elapsed > 15000) { // 15秒无新分片
-                                clearInterval(video._fragmentCheckTimer);
-                                video._fragmentCheckTimer = null;
-                                console.log('[下播检测] 超过15秒无新分片，判定为下播');
-                                showOfflineOverlay(currentAnchorName);
-                                if (window._hlsInst) {
-                                    try { window._hlsInst.stopLoad(); } catch(e) {}
+                            const now = Date.now();
+                            const elapsed = now - (video._lastFragmentTime || 0);
+                            // 如果超过 90 秒没收到新分片，且视频当前时间在过去 10 秒内都没变化，才判下播
+                            if (elapsed > 90000) {
+                                // 检查时间是否在变动
+                                if (Math.abs(video.currentTime - (video._lastCheckTime || 0)) < 0.5) {
+                                    clearInterval(video._fragmentCheckTimer);
+                                    video._fragmentCheckTimer = null;
+                                    console.log('[下播检测] 超过90秒无新分片且画面静止，判定为下播');
+                                    showOfflineOverlay(currentAnchorName);
+                                    if (window._hlsInst) {
+                                        try { window._hlsInst.stopLoad(); } catch(e) {}
+                                    }
+                                    if (video) {
+                                        try { video.pause(); } catch(e) {}
+                                    }
+                                    return;
                                 }
-                                if (video) {
-                                    try { video.pause(); } catch(e) {}
-                                }
+                                // 如果时间还在走，说明只是没请求新分片，更新检查时间
+                                video._lastCheckTime = video.currentTime;
                             }
                         }, 5000);
                     }
