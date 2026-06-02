@@ -113,11 +113,6 @@
             <div class="offline-text" id="offline-text">主播已下播</div>
             <div class="offline-sub" id="offline-sub">直播已结束</div>
             <button class="offline-retry" onclick="hideOfflineOverlay(); if(lastRoomUrl) goWithUrl(lastRoomUrl);">🔄 重新检测</button>
-            <!-- 新增：下播推荐板块 -->
-            <div id="offline-recom" style="margin-top: 20px; display: none; width: 100%; max-width: 280px;">
-                <div style="font-size: 12px; color: #777; margin-bottom: 8px; text-align: center;">关注的主播正在直播：</div>
-                <div id="offline-recom-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
-            </div>
         </div>
     </div>
     <div id="chat-panel">
@@ -209,9 +204,6 @@
     let sortable = null;
     const HISTORY_MAX = 100;
 
-    // 下播轮询定时器
-    let offlinePollTimer = null;
-
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
@@ -244,105 +236,16 @@
 
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
 
-    // ========== 优化后的下播遮罩控制 ==========
-    function showOfflineOverlay(anchorName, reason = 'offline') {
+    function showOfflineOverlay(anchorName) {
         const el = document.getElementById('offline-overlay');
         const name = anchorName || currentAnchorName || '主播';
-        const iconEl = el.querySelector('.offline-icon');
-        const textEl = document.getElementById('offline-text');
-        const subEl = document.getElementById('offline-sub');
-
-        if (reason === 'stall') {
-            iconEl.textContent = '🌐';
-            textEl.textContent = '网络连接中断';
-            subEl.textContent = '检测到播放流卡顿或断开，正在尝试自动恢复...';
-            // 卡顿时隐藏推荐
-            document.getElementById('offline-recom').style.display = 'none';
-        } else {
-            iconEl.textContent = '📴';
-            textEl.textContent = name + ' 已下播';
-            subEl.textContent = '直播已结束，可点击下方按钮重新检测或观看其他主播';
-            // 真实下播时显示推荐
-            renderOfflineRecommendations();
-        }
+        document.getElementById('offline-text').textContent = name + ' 已下播';
+        document.getElementById('offline-sub').textContent = '直播已结束，可点击下方按钮重新检测';
         el.classList.add('show');
-
-        // 清除旧的轮询定时器
-        if (offlinePollTimer) {
-            clearInterval(offlinePollTimer);
-            offlinePollTimer = null;
-        }
-
-        // 自动化处理
-        if (reason === 'stall') {
-            // 卡顿3秒后自动重连
-            setTimeout(() => {
-                if (el.classList.contains('show') && lastRoomUrl) {
-                    hideOfflineOverlay();
-                    goWithUrl(lastRoomUrl);
-                }
-            }, 3000);
-        } else if (reason === 'offline' && lastRoomUrl) {
-            // 下播轮询：每60秒检测一次是否复播
-            offlinePollTimer = setInterval(async () => {
-                try {
-                    const _sc = lastRoomUrl.includes('sooplive.com') ? getSoopCookie() : '';
-                    const _tc = lastRoomUrl.includes('twitch.tv') ? getTwitchCookie() : '';
-                    const _ck = _sc || _tc;
-                    const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(lastRoomUrl)}` + (_ck ? `&cookie=${encodeURIComponent(_ck)}` : ''));
-                    if (r.ok) {
-                        const d = await r.json();
-                        if (d.streams && d.streams.length) {
-                            hideOfflineOverlay();
-                            goWithUrl(lastRoomUrl);
-                        }
-                    }
-                } catch (e) {}
-            }, 60000);
-        }
     }
 
     function hideOfflineOverlay() {
         document.getElementById('offline-overlay').classList.remove('show');
-        if (offlinePollTimer) {
-            clearInterval(offlinePollTimer);
-            offlinePollTimer = null;
-        }
-        // 隐藏推荐
-        document.getElementById('offline-recom').style.display = 'none';
-    }
-
-    // ========== 下播推荐功能 ==========
-    function renderOfflineRecommendations() {
-        const recomDiv = document.getElementById('offline-recom');
-        const listDiv = document.getElementById('offline-recom-list');
-        if (!recomDiv || !listDiv) return;
-
-        const follows = _loadFollows();
-        const onlineItems = follows.filter(x => x.status === 'online' && x.url !== lastRoomUrl);
-
-        if (onlineItems.length > 0) {
-            recomDiv.style.display = 'block';
-            let html = '';
-            onlineItems.slice(0, 3).forEach(item => {
-                const avatarHtml = item.avatar
-                    ? `<img src="${escapeHtml(item.avatar)}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0;">`
-                    : '<div style="width:26px;height:26px;border-radius:50%;background:#2a2a2a;flex-shrink:0;"></div>';
-                html += `
-                    <div onclick="hideOfflineOverlay(); document.getElementById('url').value='${escapeHtml(item.url)}'; window.go();"
-                         style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:#161616;border:1px solid #2a2a2a;border-radius:6px;cursor:pointer;transition:all 0.2s;"
-                         onmouseover="this.style.borderColor='#f5a623';this.style.background='#222';"
-                         onmouseout="this.style.borderColor='#2a2a2a';this.style.background='#161616';">
-                        ${avatarHtml}
-                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ddd;font-size:12px;text-align:left;">${escapeHtml(item.platform + ' · ' + item.name)}</span>
-                        <span style="color:#8bc34a;font-size:11px;font-weight:bold;flex-shrink:0;">● 直播中</span>
-                    </div>
-                `;
-            });
-            listDiv.innerHTML = html;
-        } else {
-            recomDiv.style.display = 'none';
-        }
     }
 
     function loadVolumeMemory() {
@@ -986,7 +889,7 @@
                     hideOfflineOverlay();
                 } else {
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
-                    showOfflineOverlay(currentAnchorName, 'offline'); // 真实下播
+                    showOfflineOverlay(currentAnchorName);
                     setBtn(false);
                     return;
                 }
@@ -1126,7 +1029,7 @@
                                     if (video._reParseCount <= 3) {
                                         setTimeout(() => goWithUrl(lastRoomUrl), 500);
                                     } else {
-                                        showOfflineOverlay(currentAnchorName, 'stall'); // 卡顿
+                                        showOfflineOverlay(currentAnchorName);
                                     }
                                 }
                             }
@@ -1159,7 +1062,6 @@
                         video._mpegts = null; 
                     }
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
-                    if (video._fragmentCheckTimer) { clearInterval(video._fragmentCheckTimer); video._fragmentCheckTimer = null; }
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
                     const hlsId = video._hlsIdCounter;
@@ -1233,7 +1135,7 @@
                                         hls.destroy(); window._hlsInst = null;
                                         if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                                        else showOfflineOverlay(currentAnchorName, 'stall'); // 网络错误也视为卡顿
+                                        else showOfflineOverlay(currentAnchorName);
                                         return;
                                     }
                                     video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
@@ -1246,7 +1148,7 @@
                                     } else {
                                         hls.destroy(); window._hlsInst = null;
                                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                                        else showOfflineOverlay(currentAnchorName, 'stall'); // 重连失败
+                                        else showOfflineOverlay(currentAnchorName);
                                     }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                                     hls.recoverMediaError();
@@ -1265,60 +1167,6 @@
 
                     startHls(url);
 
-                    // ===== 改进后的下播检测：监听播放列表更新 + 画面静止判断 =====
-                    if (window._hlsInst && video._hlsId === hlsId) {
-                        const hls = window._hlsInst;
-                        video._lastActivityTime = Date.now();
-                        video._lastPlaylistUpdate = Date.now();
-                        video._checkCurrentTime = video.currentTime;
-
-                        hls.on(Hls.Events.LEVEL_UPDATED, () => {
-                            if (video._hlsId !== hlsId) return;
-                            video._lastPlaylistUpdate = Date.now();
-                            video._lastActivityTime = Date.now();
-                        });
-
-                        hls.on(Hls.Events.FRAG_BUFFERED, () => {
-                            if (video._hlsId !== hlsId) return;
-                            video._lastActivityTime = Date.now();
-                            video._checkCurrentTime = video.currentTime;
-                        });
-
-                        video._fragmentCheckTimer = setInterval(() => {
-                            if (video._hlsId !== hlsId || !art || !video) {
-                                clearInterval(video._fragmentCheckTimer);
-                                video._fragmentCheckTimer = null;
-                                return;
-                            }
-
-                            const now = Date.now();
-                            const noActivity = (now - (video._lastActivityTime || 0)) > 90000;
-                            const playlistStale = (now - (video._lastPlaylistUpdate || 0)) > 90000;
-                            const currentTimeChanged = Math.abs(video.currentTime - (video._checkCurrentTime || 0)) > 0.5;
-
-                            if (noActivity && playlistStale && !currentTimeChanged) {
-                                clearInterval(video._fragmentCheckTimer);
-                                video._fragmentCheckTimer = null;
-                                console.log('[下播检测] 长时间无播放列表更新、无新数据且画面静止，判定为下播');
-                                showOfflineOverlay(currentAnchorName, 'offline'); // 真实下播
-                                if (window._hlsInst) {
-                                    try { window._hlsInst.stopLoad(); } catch(e) {}
-                                }
-                                if (video) {
-                                    try { video.pause(); } catch(e) {}
-                                }
-                                return;
-                            }
-
-                            if (currentTimeChanged) {
-                                video._checkCurrentTime = video.currentTime;
-                                if (playlistStale) {
-                                    video._lastActivityTime = now;
-                                }
-                            }
-                        }, 5000);
-                    }
-
                     let lastTime = -1, stallCount = 0;
                     video._hlsStallTimer = setInterval(() => {
                         if (video._hlsId !== hlsId || !art || !video) {
@@ -1333,7 +1181,7 @@
                                 if (video._hlsReParseCount <= 3) {
                                     if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
                                 } else {
-                                    showOfflineOverlay(currentAnchorName, 'stall'); // 卡顿
+                                    showOfflineOverlay(currentAnchorName);
                                 }
                             }
                         } else { stallCount = 0; }
