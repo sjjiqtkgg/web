@@ -67,7 +67,7 @@
         .page-toast .toast-sub { font-size: 12px; color: #aaa; margin-top: 2px; }
         @keyframes toastIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* 播放器容器质感增强 */
+        /* 播放器质感增强 */
         #player-container {
             border: 1px solid #1a1a1a;
             box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
@@ -897,11 +897,11 @@
         });
 
         art.on('ready', () => {
-            // ===== 电影级上下黑边（上下各留 2% 内边距，可按喜好调整） =====
+            // ===== 电影级上下黑边效果：左右不留黑边，上下留 2% 内边距 =====
             const v = art.video;
             if (v) {
-                v.style.objectFit = 'contain';
-                v.style.padding = '2% 0';   /* 上下黑边宽度，可手动改为 1% 或 1.5% */
+                v.style.objectFit = 'cover';    // 关键修改：cover 让视频铺满宽度，不留左右黑边
+                v.style.padding = '2% 0';
                 v.style.boxSizing = 'border-box';
                 v.style.background = '#000';
                 v.style.transition = 'padding 0.3s ease';
