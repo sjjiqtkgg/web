@@ -67,7 +67,7 @@
         .page-toast .toast-sub { font-size: 12px; color: #aaa; margin-top: 2px; }
         @keyframes toastIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* 播放器质感增强（与黑边无关） */
+        /* 播放器容器质感增强 */
         #player-container {
             border: 1px solid #1a1a1a;
             box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
@@ -364,7 +364,6 @@
         const beforeStatus = {};
         items.forEach(item => { beforeStatus[item.url] = item.status; });
 
-        // 每次最多处理 3 个请求，避免瞬间向 Render 发起海量请求导致防爬机制熔断
         const BATCH_SIZE = 3;
         for (let i = 0; i < items.length; i += BATCH_SIZE) {
             const batch = items.slice(i, i + BATCH_SIZE);
@@ -430,7 +429,6 @@
             douyuConnecting = false;
             ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
             ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
-            // 优化：绑定定时器到当前 WebSocket 实例上
             ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(enc('type@=mrkl/')); }, 45000);
         };
         ws.onmessage = (e) => {
@@ -452,7 +450,7 @@
         };
         ws.onclose = () => { 
             douyuConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } // 优化：断开时彻底销毁定时器，防止泄漏
+            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
             if (dmWs === ws && danmakuEnabled) {
                 setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startDouyuDanmaku(roomId); }, 3000); 
             }
@@ -587,13 +585,12 @@
         dmWs = ws;
         ws.onopen = () => {
             huyaConnecting = false; ws.send(buildRegister());
-            // 优化：定时器挂载在实例上
             ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(HB); }, 60000);
         };
         ws.onmessage = (e) => { try { parseHuyaMsg(new Uint8Array(e.data)); } catch(err) {} };
         ws.onclose = () => { 
             huyaConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } // 优化：精准阻断泄漏
+            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
             if (dmWs === ws && danmakuEnabled) {
                 setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startHuyaDanmaku(config); }, 3000);
             } 
@@ -675,17 +672,14 @@
         if (!danmakuEnabled || currentTab !== 'danmaku') return;
         if (!text || !text.trim() || !chatMessagesDiv) return;
 
-        // 清除初始提示
         const emptyTip = chatMessagesDiv.querySelector('.empty-chat');
         if (emptyTip) emptyTip.remove();
 
-        // 增量追加新节点，取代全量字符串重拼 innerHTML
         const msgEl = document.createElement('div');
         msgEl.className = 'chat-msg';
         msgEl.innerHTML = `<span class="chat-nick">${escapeHtml(nick.substring(0,30))}</span><span class="chat-text">${escapeHtml(text.substring(0,200))}</span>`;
         chatMessagesDiv.appendChild(msgEl);
 
-        // 高效控制 DOM 节点上限，保证极佳运行效率
         while (chatMessagesDiv.children.length > CHAT_MAX) {
             chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
         }
@@ -903,11 +897,11 @@
         });
 
         art.on('ready', () => {
-            // ===== 电影级上下黑边效果（直接作用于 video 元素，确保生效） =====
+            // ===== 电影级上下黑边（上下各留 2% 内边距，可按喜好调整） =====
             const v = art.video;
             if (v) {
                 v.style.objectFit = 'contain';
-                v.style.padding = '4% 0';
+                v.style.padding = '2% 0';   /* 上下黑边宽度，可手动改为 1% 或 1.5% */
                 v.style.boxSizing = 'border-box';
                 v.style.background = '#000';
                 v.style.transition = 'padding 0.3s ease';
