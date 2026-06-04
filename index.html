@@ -67,18 +67,23 @@
         .page-toast .toast-sub { font-size: 12px; color: #aaa; margin-top: 2px; }
         @keyframes toastIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
-        /* ===== 电影级上下黑边优化（宽画幅效果） ===== */
-        #player .art-video-container video {
-            padding: 4% 0 !important;
-            box-sizing: border-box !important;
-            object-fit: contain !important;
-            background-color: #000 !important;
-            transition: padding 0.3s ease;
+        /* ===== 完美修复版：电影级上下黑边优化（真·宽画幅效果） ===== */
+        /* 核心修复：精准命中 Artplayer 的原生 video class 容器 */
+        #player .art-video {
+            height: 92% !important;  /* 画面整体高度压缩到 92% */
+            top: 4% !important;      /* 向下偏移 4%，完美居中，自然露出上下黑边 */
+            bottom: auto !important;
+            object-fit: contain !important; /* 确保比例绝不失真拉伸 */
         }
-        /* 可选增强：播放器外框包边，提升质感 */
+        
+        /* （可选体验优化）如果你希望【弹幕】也被限制在画面内，不要飘到黑边上，取消注释下面这行 */
+        /* #player .art-danmaku { height: 92% !important; top: 4% !important; } */
+
+        /* 增加整个播放器外边框的质感和微弱内部阴影，看起来更像高端播放器 */
         #player-container {
             border: 1px solid #1a1a1a;
-            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.9);
+            background-color: #000; /* 确保空出的黑边绝对纯黑 */
         }
     </style>
 </head>
