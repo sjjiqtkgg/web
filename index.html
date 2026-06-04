@@ -339,7 +339,8 @@
             </div>
         `;
         toast.onclick = () => {
-            document.getElementById('url').value = url; window.go(); container.innerHTML = '';
+            document.getElementById('url').value = url; window.go();
+            toast.remove();
         };
         container.appendChild(toast);
         setTimeout(() => {
@@ -683,7 +684,9 @@
         while (chatMessagesDiv.children.length > CHAT_MAX) {
             chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
         }
-        chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        // 用户往上翻看历史时不强制滚到底，靠近底部（80px以内）才自动追
+        const isNearBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80;
+        if (isNearBottom) chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
     }
 
     function ensureHttps(url) {
@@ -826,6 +829,8 @@
                     if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
                     if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
+                    if (video._adWaitTimer) { clearTimeout(video._adWaitTimer); video._adWaitTimer = null; }
+                    video._waitingForAd = false;
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
                     const hlsId = video._hlsIdCounter; video._hlsId = hlsId; video._hlsReParseCount = 0;
@@ -841,6 +846,7 @@
                             hls.on(Hls.Events.FRAG_BUFFERED, () => {
                                 if (video._waitingForAd === true) {
                                     video._waitingForAd = false;
+                                    if (video._adWaitTimer) { clearTimeout(video._adWaitTimer); video._adWaitTimer = null; }
                                     if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
                                     video.play().catch(() => {});
                                 }
@@ -848,7 +854,17 @@
                             hls.on(Hls.Events.ERROR, (e, data) => {
                                 if (video._hlsId !== hlsId) return;
                                 if (data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || data.details === 'levelEmptyError') {
-                                    video._waitingForAd = true; if (!video.paused) video.pause(); return; 
+                                    if (!video._waitingForAd) {
+                                        video._waitingForAd = true;
+                                        if (!video.paused) video.pause();
+                                        // 30秒超时保护：广告期间若长时间无新片段则强制重新解析
+                                        video._adWaitTimer = setTimeout(() => {
+                                            video._waitingForAd = false; video._adWaitTimer = null;
+                                            console.warn('[hls] 广告等待超时，强制重新解析');
+                                            if (lastRoomUrl) goWithUrl(lastRoomUrl);
+                                        }, 30000);
+                                    }
+                                    return; 
                                 }
                                 if (!data.fatal) {
                                     if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
