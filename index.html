@@ -665,7 +665,7 @@
         };
     }
 
-    /* ===== 优化：高并发轻量化渲染，采用增量 DOM 渲染，杜绝大房间 CPU 飙升假死 ===== */
+/* ===== 优化：高并发轻量化渲染，采用增量 DOM 渲染，杜绝大房间 CPU 飙升假死 ===== */
     function addChatMessage(nick, text) {
         if (!danmakuEnabled || currentTab !== 'danmaku') return;
         if (!text || !text.trim() || !chatMessagesDiv) return;
@@ -674,19 +674,26 @@
         const emptyTip = chatMessagesDiv.querySelector('.empty-chat');
         if (emptyTip) emptyTip.remove();
 
-        // 增量追加新节点，取代全量字符串重拼 innerHTML
+        // 【核心修改 1】：在追加新消息和删除旧消息之前，先判断当前是否在底部
+        // 补充 document.hidden 逻辑：如果切到了后台，强制认为需要滚动到底部
+        const isNearBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80;
+        const shouldScroll = isNearBottom || document.hidden;
+
+        // 增量追加新节点
         const msgEl = document.createElement('div');
         msgEl.className = 'chat-msg';
         msgEl.innerHTML = `<span class="chat-nick">${escapeHtml(nick.substring(0,30))}</span><span class="chat-text">${escapeHtml(text.substring(0,200))}</span>`;
         chatMessagesDiv.appendChild(msgEl);
 
-        // 高效控制 DOM 节点上限，保证极佳运行效率
+        // 高效控制 DOM 节点上限
         while (chatMessagesDiv.children.length > CHAT_MAX) {
             chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
         }
-        // 用户往上翻看历史时不强制滚到底，靠近底部（80px以内）才自动追
-        const isNearBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80;
-        if (isNearBottom) chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        
+        // 【核心修改 2】：根据操作 DOM 前计算好的状态，决定是否追随到底部
+        if (shouldScroll) {
+            chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        }
     }
 
     function ensureHttps(url) {
