@@ -359,7 +359,6 @@
         const beforeStatus = {};
         items.forEach(item => { beforeStatus[item.url] = item.status; });
 
-        // 每次最多处理 3 个请求，避免瞬间向 Render 发起海量请求导致防爬机制熔断
         const BATCH_SIZE = 3;
         for (let i = 0; i < items.length; i += BATCH_SIZE) {
             const batch = items.slice(i, i + BATCH_SIZE);
@@ -425,7 +424,6 @@
             douyuConnecting = false;
             ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
             ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
-            // 优化：绑定定时器到当前 WebSocket 实例上
             ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(enc('type@=mrkl/')); }, 45000);
         };
         ws.onmessage = (e) => {
@@ -447,7 +445,7 @@
         };
         ws.onclose = () => { 
             douyuConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } // 优化：断开时彻底销毁定时器，防止泄漏
+            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
             if (dmWs === ws && danmakuEnabled) {
                 setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startDouyuDanmaku(roomId); }, 3000); 
             }
@@ -582,13 +580,12 @@
         dmWs = ws;
         ws.onopen = () => {
             huyaConnecting = false; ws.send(buildRegister());
-            // 优化：定时器挂载在实例上
             ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(HB); }, 60000);
         };
         ws.onmessage = (e) => { try { parseHuyaMsg(new Uint8Array(e.data)); } catch(err) {} };
         ws.onclose = () => { 
             huyaConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } // 优化：精准阻断泄漏
+            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
             if (dmWs === ws && danmakuEnabled) {
                 setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startHuyaDanmaku(config); }, 3000);
             } 
@@ -665,32 +662,25 @@
         };
     }
 
-/* ===== 优化：高并发轻量化渲染，采用增量 DOM 渲染，杜绝大房间 CPU 飙升假死 ===== */
     function addChatMessage(nick, text) {
         if (!danmakuEnabled || currentTab !== 'danmaku') return;
         if (!text || !text.trim() || !chatMessagesDiv) return;
 
-        // 清除初始提示
         const emptyTip = chatMessagesDiv.querySelector('.empty-chat');
         if (emptyTip) emptyTip.remove();
 
-        // 【核心修改 1】：在追加新消息和删除旧消息之前，先判断当前是否在底部
-        // 补充 document.hidden 逻辑：如果切到了后台，强制认为需要滚动到底部
         const isNearBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80;
         const shouldScroll = isNearBottom || document.hidden;
 
-        // 增量追加新节点
         const msgEl = document.createElement('div');
         msgEl.className = 'chat-msg';
         msgEl.innerHTML = `<span class="chat-nick">${escapeHtml(nick.substring(0,30))}</span><span class="chat-text">${escapeHtml(text.substring(0,200))}</span>`;
         chatMessagesDiv.appendChild(msgEl);
 
-        // 高效控制 DOM 节点上限
         while (chatMessagesDiv.children.length > CHAT_MAX) {
             chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
         }
         
-        // 【核心修改 2】：根据操作 DOM 前计算好的状态，决定是否追随到底部
         if (shouldScroll) {
             chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
         }
@@ -772,8 +762,26 @@
     }
 
     function playStream(streams) {
+        // 【新增】：强制释放旧视频内存
+        if (art && art.video) {
+            try {
+                art.video.pause();
+                art.video.removeAttribute('src');
+                art.video.load();
+            } catch(e) {}
+        }
+        
         if (art) { try { art.destroy(true); } catch(e){} art = null; }
-        if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
+        
+        if (window._hlsInst) { 
+            try { 
+                window._hlsInst.stopLoad();
+                window._hlsInst.detachMedia();
+                window._hlsInst.destroy();
+            } catch(e){} 
+            window._hlsInst = null; 
+        }
+        
         document.getElementById('player').innerHTML = '';
 
         let defaultIndex = 0;
@@ -833,8 +841,29 @@
                     });
                 },
                 m3u8: function(video, url) {
-                    if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
-                    if (video._mpegts) { try { video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts = null; }
+                    // 【优化】：彻底清理上一个 Hls 实例并释放 video 资源
+                    if (window._hlsInst) { 
+                        try { 
+                            window._hlsInst.stopLoad();
+                            window._hlsInst.detachMedia();
+                            window._hlsInst.destroy();
+                        } catch(e){} 
+                        window._hlsInst = null; 
+                    }
+                    if (video._mpegts) { 
+                        try { 
+                            video._mpegts.pause();
+                            video._mpegts.unload(); 
+                            video._mpegts.detachMediaElement(); 
+                            video._mpegts.destroy(); 
+                        } catch(e){} 
+                        video._mpegts = null; 
+                    }
+                    
+                    // 强制清空当前 video 源，释放底层内存
+                    video.removeAttribute('src');
+                    video.load();
+                    
                     if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
                     if (video._adWaitTimer) { clearTimeout(video._adWaitTimer); video._adWaitTimer = null; }
                     video._waitingForAd = false;
@@ -847,7 +876,15 @@
                         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
                         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                            const hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 10, lowLatencyMode: false, maxBufferLength: 15, maxMaxBufferLength: 30, maxBufferSize: 80 * 1000 * 1000 });
+                            // 【核心修改】：降低最大缓冲区限制，防止内存爆炸
+                            const hls = new Hls({ 
+                                liveSyncDurationCount: 3, 
+                                liveMaxLatencyDurationCount: 10, 
+                                lowLatencyMode: false, 
+                                maxBufferLength: 15, 
+                                maxMaxBufferLength: 30, 
+                                maxBufferSize: 30 * 1000 * 1000   // 从 80MB 降至 30MB
+                            });
                             hls.loadSource(srcUrl); hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.FRAG_BUFFERED, () => {
@@ -864,7 +901,6 @@
                                     if (!video._waitingForAd) {
                                         video._waitingForAd = true;
                                         if (!video.paused) video.pause();
-                                        // 30秒超时保护：广告期间若长时间无新片段则强制重新解析
                                         video._adWaitTimer = setTimeout(() => {
                                             video._waitingForAd = false; video._adWaitTimer = null;
                                             console.warn('[hls] 广告等待超时，强制重新解析');
