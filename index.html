@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
     <title>聚合直播 - 全平台版</title>
-    <!-- 默认 favicon，之后会被主播头像动态替换 -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%23333'/%3E%3Ctext x='50' y='55' text-anchor='middle' fill='%23666' font-size='40'%3E📺%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
@@ -141,44 +140,32 @@
 <script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
-    // ==================== 头像代理配置（增强版） ====================
-    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 你的 Worker 域名
+    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function avatarSrc(url) {
-        // 【防御1】：处理非字符串类型（防止 startsWith 报错导致循环中断）
         if (typeof url !== 'string') {
             if (url && typeof url === 'object') {
-                // 【兼容】：尝试从对象中提取 URL（虎牙等平台可能返回 {big: "...", middle: "..."}）
                 url = url.big || url.middle || url.small || url.url || url.src || '';
             } else {
-                url = ''; // 数字、null、undefined 等直接置空
+                url = '';
             }
         }
-        
-        // 【防御2】：空值或非 http 链接直接返回空
         if (!url || !url.startsWith('http')) return '';
-        
-        // 【核心】：只有抖音系等严格防盗链平台才走 Worker 代理
         const strictDomains = ['douyinpic.com', 'snssdk.com', 'toutiao.com', 'amemv.com'];
         if (strictDomains.some(d => url.includes(d))) {
             return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
         }
-        
-        // 其他平台（虎牙、斗鱼、B站等）直接返回原链接
         return url;
     }
 
     function handleImgError(img) {
-        // 避免死循环：如果已经包含 /avatar，说明代理也失败了
         if (img.src && !img.src.includes('/avatar') && img.src.startsWith('http')) {
             img.src = WORKER_BASE + '/avatar?url=' + encodeURIComponent(img.src);
         } else {
-            // 代理也失败或原本就没链接，显示默认灰色头像占位图
             img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%23333" width="36" height="36"/%3E%3Ctext fill="%23888" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-size="20"%3E%F0%9F%91%A4%3C/text%3E%3C/svg%3E';
         }
     }
 
-    // ==================== 动态 Favicon 更新 ====================
     function updateFavicon(avatarUrl) {
         let link = document.querySelector("link[rel*='icon']");
         if (!link) {
@@ -186,7 +173,6 @@
             link.rel = 'icon';
             document.head.appendChild(link);
         }
-        // 如果有头像则使用头像，否则使用默认电视机图标
         link.href = avatarUrl || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="40" fill="%23333"/%3E%3Ctext x="50" y="55" text-anchor="middle" fill="%23666" font-size="40"%3E📺%3C/text%3E%3C/svg%3E';
     }
 
@@ -402,7 +388,6 @@
         }, 6000);
     }
 
-    /* ===== 优化：分批限流并发控制，保护免费后端不崩溃、不被限流 ===== */
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
@@ -783,13 +768,14 @@
                     streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
-                    // 更新标签页图标为主播头像
                     updateFavicon(currentAvatar);
                     dmConfig = data.danmaku || null;
                     if (raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
                     if (raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
                 } else {
+                    // 【优化】解析失败兜底提示
+                    alert(`解析失败：${data?.error || '主播可能未开播或链接无效，请检查后重试'}`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName); setBtn(false); return;
                 }
@@ -807,7 +793,6 @@
             const fileName = raw.split('/').pop().split('?')[0] || '直链';
             streams = [{ cdn: '直链', url: ensureHttps(raw), type: raw.includes('.m3u8') ? 'm3u8' : 'flv' }];
             currentAnchorName = fileName; currentAvatar = ''; currentPlatform = '直链'; dmConfig = null;
-            // 直链没有头像，恢复默认图标
             updateFavicon(null);
         } else { setBtn(false); return; }
 
