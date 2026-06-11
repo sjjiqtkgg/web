@@ -30,17 +30,17 @@
         .offline-sub { color: #aaa; font-size: 13px; }
         .offline-retry { margin-top: 8px; padding: 8px 24px; background: #f5a623; color: #000; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
         .offline-retry:hover { background: #e09510; }
-        
+
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
         .chat-header span { color: #f5a623; font-weight: 500; }
         .danmaku-switch { display: flex; align-items: center; gap: 8px; }
         .switch-icon { font-size: 18px; cursor: pointer; padding: 4px; border-radius: 4px; }
         .switch-icon:hover { background: #2a2a2a; }
-        
+
         .chat-content { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; position: relative; }
         .chat-messages, .follow-list, .history-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
-        
+
         .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
         .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
@@ -143,7 +143,8 @@
     const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 确认这是你的 Worker 域名
     
     function avatarSrc(url) {
-        if (!url || !url.startsWith('http')) return url || '';
+        // 严格类型检查，防止非字符串导致 .startsWith 报错
+        if (!url || typeof url !== 'string' || !url.startsWith('http')) return '';
         // 只有抖音系等严格防盗链平台才走 Worker 代理
         const strictDomains = ['douyinpic.com', 'snssdk.com', 'toutiao.com', 'amemv.com'];
         if (strictDomains.some(d => url.includes(d))) {
@@ -785,7 +786,6 @@
     }
 
     function playStream(streams) {
-        // 【新增】：强制释放旧视频内存
         if (art && art.video) {
             try {
                 art.video.pause();
@@ -864,7 +864,6 @@
                     });
                 },
                 m3u8: function(video, url) {
-                    // 【优化】：彻底清理上一个 Hls 实例并释放 video 资源
                     if (window._hlsInst) { 
                         try { 
                             window._hlsInst.stopLoad();
@@ -883,7 +882,6 @@
                         video._mpegts = null; 
                     }
                     
-                    // 强制清空当前 video 源，释放底层内存
                     video.removeAttribute('src');
                     video.load();
                     
@@ -899,14 +897,13 @@
                         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
                         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                            // 【核心修改】：降低最大缓冲区限制，防止内存爆炸
                             const hls = new Hls({ 
                                 liveSyncDurationCount: 3, 
                                 liveMaxLatencyDurationCount: 10, 
                                 lowLatencyMode: false, 
                                 maxBufferLength: 15, 
                                 maxMaxBufferLength: 30, 
-                                maxBufferSize: 30 * 1000 * 1000   // 从 80MB 降至 30MB
+                                maxBufferSize: 30 * 1000 * 1000
                             });
                             hls.loadSource(srcUrl); hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
