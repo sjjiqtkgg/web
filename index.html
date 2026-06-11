@@ -148,7 +148,7 @@
     // 默认头像 Base64
     const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
 
-    // 海外平台头像特征 (需要走 Worker 代理)
+    // 海外平台头像特征
     function isForeignAvatar(url) {
         if (!url) return false;
         const foreignKeywords = ['jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch'];
@@ -317,7 +317,7 @@
         renderHistoryList();
     }
 
-    // ==================== 渲染列表 (区分头像策略) ====================
+    // ==================== 渲染列表 (含 referrerpolicy="no-referrer") ====================
     function renderHistoryList() {
         if (!historyListDiv) return;
         const items = _loadHistory();
@@ -520,7 +520,6 @@
         ws.onerror = () => { douyuConnecting = false; if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } };
     }
 
-    // 虎牙 Tars 协议解析与连接
     function tarsReader(ab) {
         const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab);
         let pos = 0;
