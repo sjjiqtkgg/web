@@ -145,10 +145,8 @@
     const API_BASE = 'https://live1-cxe9.onrender.com'; // 你的后端域名
     const CF_WORKER = WORKER_BASE;
 
-    // 默认头像 Base64
     const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
 
-    // 需要走 Worker 代理的域名 (海外平台 + 抖音)
     function isForeignAvatar(url) {
         if (!url) return false;
         const foreignKeywords = [
@@ -159,90 +157,42 @@
     }
 
     function getFinalAvatarUrl(originalUrl) {
-        if (!originalUrl || typeof originalUrl !== 'string' || !originalUrl.startsWith('http')) {
-            return defaultAvatar;
-        }
-        if (isForeignAvatar(originalUrl)) {
-            return WORKER_BASE + '/avatar?url=' + encodeURIComponent(originalUrl);
-        } else {
-            return originalUrl;
-        }
+        if (!originalUrl || typeof originalUrl !== 'string' || !originalUrl.startsWith('http')) return defaultAvatar;
+        if (isForeignAvatar(originalUrl)) return WORKER_BASE + '/avatar?url=' + encodeURIComponent(originalUrl);
+        return originalUrl;
     }
 
-    function avatarSrc(url) {
-        if (typeof url !== 'string') {
-            if (url && typeof url === 'object') {
-                url = url.big || url.middle || url.small || url.url || url.src || '';
-            } else {
-                url = '';
-            }
-        }
-        if (!url || !url.startsWith('http')) return '';
-        return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
-    }
-
-    function handleImgError(img) {
-        img.onerror = null;
-        img.src = defaultAvatar;
-    }
+    function handleImgError(img) { img.onerror = null; img.src = defaultAvatar; }
 
     function updateFavicon(avatarUrl) {
         let link = document.querySelector("link[rel*='icon']");
-        if (!link) {
-            link = document.createElement('link');
-            link.rel = 'icon';
-            document.head.appendChild(link);
-        }
+        if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
         link.href = avatarUrl || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="40" fill="%23333"/%3E%3Ctext x="50" y="55" text-anchor="middle" fill="%23666" font-size="40"%3E📺%3C/text%3E%3C/svg%3E';
     }
 
-    window.addEventListener('error', (e) => {
-        if (e.message && e.message.includes('SourceBuffer has been removed')) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-    }, true);
+    window.addEventListener('error', e => { if (e.message && e.message.includes('SourceBuffer has been removed')) { e.preventDefault(); e.stopPropagation(); } }, true);
 
     // ==================== 全局变量 ====================
-    let art = null;
-    let lastRoomUrl = '';
-    let savedVolume = 0.5;
-    let savedMuted = true;
-    let currentAnchorName = '';
-    let currentPlatform = '';
-    let currentAvatar = '';
-    let danmakuEnabled = true;
-    let currentTab = 'danmaku';
-    
-    let dmWs = null;
-    let douyinWs = null;
-    let twitchWs = null;
-    let currentDanmakuRoom = '';
-
-    let douyuConnecting = false;
-    let huyaConnecting = false;
-    let douyinConnecting = false;
-    let twitchConnecting = false;
-
+    let art = null, lastRoomUrl = '', savedVolume = 0.5, savedMuted = true;
+    let currentAnchorName = '', currentPlatform = '', currentAvatar = '';
+    let danmakuEnabled = true, currentTab = 'danmaku';
+    let dmWs = null, douyinWs = null, twitchWs = null, currentDanmakuRoom = '';
+    let douyuConnecting = false, huyaConnecting = false, douyinConnecting = false, twitchConnecting = false;
     let dmConfig = null;
     const CHAT_MAX = 300;
-    let chatMessagesDiv = null;
-    let followListDiv = null;
-    let historyListDiv = null;
-    let sortable = null;
+    let chatMessagesDiv = null, followListDiv = null, historyListDiv = null, sortable = null;
     const HISTORY_MAX = 100;
-
-    // 防抖锁
     window._reParseLock = false;
 
     // ==================== 本地存储 ====================
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
+    function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
     function getSoopCookie() { try { return localStorage.getItem('ps_soop_cookie') || ''; } catch(e) { return ''; } }
     function saveSoopCookie(v) { try { localStorage.setItem('ps_soop_cookie', v); } catch(e) {} }
     function getTwitchCookie() { try { return localStorage.getItem('ps_twitch_cookie') || ''; } catch(e) { return ''; } }
     function saveTwitchCookie(v) { try { localStorage.setItem('ps_twitch_cookie', v); } catch(e) {} }
-    function _saveHistory(arr) { try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {} }
 
     window.saveSoopCookieUI = () => {
         const val = document.getElementById('soop-cookie-input').value.trim();
@@ -267,14 +217,12 @@
 
     function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'>'); }
 
+    // ==================== UI 工具函数 ====================
     function showOfflineOverlay(anchorName) {
         const el = document.getElementById('offline-overlay');
-        const name = anchorName || currentAnchorName || '主播';
-        document.getElementById('offline-text').textContent = name + ' 已下播';
-        document.getElementById('offline-sub').textContent = '直播已结束，可点击下方按钮重新检测';
+        document.getElementById('offline-text').textContent = (anchorName || currentAnchorName || '主播') + ' 已下播';
         el.classList.add('show');
     }
-
     function hideOfflineOverlay() { document.getElementById('offline-overlay').classList.remove('show'); }
 
     function loadVolumeMemory() {
@@ -287,19 +235,8 @@
 
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
-        if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) {
-            const roomId = lastRoomUrl.split('/').pop().split('?')[0];
-            anchorName = `房间 ${roomId}`;
-        }
-        if (anchorName && !defaultNames.includes(anchorName) && platform && platform !== '未知') {
-            document.title = platform + ' ' + anchorName;
-        } else if (platform && platform !== '未知') {
-            document.title = platform;
-        } else if (anchorName) {
-            document.title = anchorName;
-        } else {
-            document.title = '聚合直播';
-        }
+        if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) anchorName = `房间 ${lastRoomUrl.split('/').pop().split('?')[0]}`;
+        document.title = anchorName && !defaultNames.includes(anchorName) && platform && platform !== '未知' ? `${platform} ${anchorName}` : platform || anchorName || '聚合直播';
     }
 
     function getPlatformName(url) {
@@ -317,822 +254,366 @@
         if (!url) return;
         let history = _loadHistory().filter(item => item.url !== url);
         history.unshift({ url, name: name || url.split('/').pop().split('?')[0] || '未知', platform: platform || getPlatformName(url), avatar: avatar || '', time: Date.now() });
-        if (history.length > HISTORY_MAX) history = history.slice(0, HISTORY_MAX);
-        _saveHistory(history);
+        _saveHistory(history.slice(0, HISTORY_MAX));
         renderHistoryList();
     }
 
-    // ==================== 渲染列表 ====================
+    // ==================== 列表渲染 ====================
+    function formatTime(t) { const d = Date.now() - t; return d < 6e4 ? '刚刚' : d < 36e5 ? Math.floor(d/6e4)+'分钟前' : d < 864e5 ? Math.floor(d/36e5)+'小时前' : new Date(t).toLocaleDateString(); }
+
     function renderHistoryList() {
         if (!historyListDiv) return;
         const items = _loadHistory();
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
-        let html = '';
-        items.forEach(item => {
-            const finalUrl = getFinalAvatarUrl(item.avatar);
-            html += `<div class="history-item" data-url="${escapeHtml(item.url)}">
-                <img class="history-avatar" src="${finalUrl}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+        historyListDiv.innerHTML = items.map(item => `
+            <div class="history-item" data-url="${escapeHtml(item.url)}">
+                <img class="history-avatar" src="${getFinalAvatarUrl(item.avatar)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
                 <span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span>
                 <span class="history-time">${formatTime(item.time)}</span>
-            </div>`;
-        });
-        historyListDiv.innerHTML = html;
-    }
-
-    function formatTime(timestamp) {
-        const diff = Date.now() - timestamp;
-        if (diff < 60000) return '刚刚';
-        if (diff < 3600000) return Math.floor(diff / 60000) + '分钟前';
-        if (diff < 86400000) return Math.floor(diff / 3600000) + '小时前';
-        return new Date(timestamp).toLocaleDateString();
+            </div>`).join('');
     }
 
     function playFromHistory(url) { document.getElementById('url').value = url; window.go(); }
 
     function updateFollowBtn(url) {
         const btn = document.getElementById('btn-fav');
-        if (!btn) return;
-        const isFollow = _loadFollows().some(x => x.url === url);
-        btn.classList.toggle('fav-on', isFollow);
-        btn.title = isFollow ? '取消关注' : '关注';
+        if (btn) { const isFollow = _loadFollows().some(x => x.url === url); btn.classList.toggle('fav-on', isFollow); btn.title = isFollow ? '取消关注' : '关注'; }
     }
 
     function renderFollowList() {
         if (!followListDiv) return;
-        const savedScrollTop = followListDiv.scrollTop;
         const items = _loadFollows();
-        if (!items.length) {
-            followListDiv.innerHTML = '<div class="empty-chat">暂无关注</div>';
-            if (sortable) sortable.destroy();
-            sortable = null;
-            return;
-        }
-        let html = '';
-        items.forEach((x, i) => {
-            const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const finalUrl = getFinalAvatarUrl(x.avatar);
-            html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">
-                <img class="follow-avatar" src="${finalUrl}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+        if (!items.length) { followListDiv.innerHTML = '<div class="empty-chat">暂无关注</div>'; sortable?.destroy(); sortable = null; return; }
+        followListDiv.innerHTML = items.map((x, i) => `
+            <div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">
+                <img class="follow-avatar" src="${getFinalAvatarUrl(x.avatar)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
                 <span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span>
-                <span class="follow-status ${x.status}">${statusText}</span>
+                <span class="follow-status ${x.status}">${x.status === 'online' ? '直播中' : '未开播'}</span>
                 <span class="follow-delete" data-del="${i}">✕</span>
-            </div>`;
-        });
-        followListDiv.innerHTML = html;
-        followListDiv.scrollTop = savedScrollTop;
-
+            </div>`).join('');
         if (sortable) sortable.destroy();
         sortable = new Sortable(followListDiv, { animation: 150, onEnd: () => {
             const newItems = [];
             followListDiv.querySelectorAll('.follow-item').forEach(el => newItems.push(items[parseInt(el.dataset.id)]));
-            _saveFollows(newItems);
-            renderFollowList();
-        } });
+            _saveFollows(newItems); renderFollowList();
+        }});
     }
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
     function showPageToast(platform, name, avatar, url) {
-        let container = document.querySelector('.page-toast-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.className = 'page-toast-container';
-            document.body.appendChild(container);
-        }
+        const container = document.querySelector('.page-toast-container') || (()=>{const c=document.createElement('div');c.className='page-toast-container';document.body.appendChild(c);return c;})();
         const toast = document.createElement('div');
         toast.className = 'page-toast';
-        const finalUrl = getFinalAvatarUrl(avatar);
         toast.innerHTML = `
-            <div class="toast-icon"><img src="${finalUrl}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';"></div>
-            <div class="toast-body">
-                <div class="toast-title">${escapeHtml(platform || '')} ${escapeHtml(name || '主播')} 开播了！</div>
-                <div class="toast-sub">点击立即观看 →</div>
-            </div>
-        `;
-        toast.onclick = () => {
-            document.getElementById('url').value = url; window.go();
-            toast.remove();
-        };
+            <div class="toast-icon"><img src="${getFinalAvatarUrl(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';"></div>
+            <div class="toast-body"><div class="toast-title">${escapeHtml(platform||'')} ${escapeHtml(name||'主播')} 开播了！</div><div class="toast-sub">点击立即观看 →</div></div>`;
+        toast.onclick = () => { document.getElementById('url').value = url; window.go(); toast.remove(); };
         container.appendChild(toast);
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.style.transition = 'opacity 0.3s'; toast.style.opacity = '0';
-                setTimeout(() => { if (toast.parentNode) toast.remove(); }, 300);
-            }
-        }, 6000);
+        setTimeout(() => { if (toast.parentNode) { toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); } }, 6000);
     }
 
-    // ==================== 批量刷新关注状态 ====================
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
-        const beforeStatus = {};
-        items.forEach(item => { beforeStatus[item.url] = item.status; });
-        const BATCH_SIZE = 3;
-        for (let i = 0; i < items.length; i += BATCH_SIZE) {
-            const batch = items.slice(i, i + BATCH_SIZE);
-            await Promise.all(batch.map(async (item) => {
+        const before = {}; items.forEach(i => before[i.url] = i.status);
+        for (let i = 0; i < items.length; i += 3) {
+            await Promise.all(items.slice(i, i+3).map(async item => {
                 try {
-                    const _sc1 = item.url.includes('sooplive.com') ? getSoopCookie() : '';
-                    const _tc1 = item.url.includes('twitch.tv') ? getTwitchCookie() : '';
-                    const _ck1 = _sc1 || _tc1;
-                    const _pu1 = `${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (_ck1 ? `&cookie=${encodeURIComponent(_ck1)}` : '');
-                    const r = await fetch(_pu1);
+                    const ck = (item.url.includes('sooplive.com') ? getSoopCookie() : '') || (item.url.includes('twitch.tv') ? getTwitchCookie() : '');
+                    const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
                     if (r.status === 400) { item.status = 'offline'; return; }
-                    if (!r.ok) { item.status = 'error'; return; }
                     const d = await r.json();
-                    if (d.error) { item.status = 'error'; }
-                    else if (d.streams && d.streams.length) {
-                        item.status = 'online';
-                        if (d.avatar) item.avatar = d.avatar;
-                    } else { item.status = 'offline'; }
+                    item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
+                    if (d.avatar) item.avatar = d.avatar;
                 } catch(e) { item.status = 'error'; }
             }));
         }
-        _saveFollows(items);
-        renderFollowList();
-        items.forEach(item => {
-            const prev = beforeStatus[item.url];
-            if (prev && prev !== 'online' && item.status === 'online') {
-                showPageToast(item.platform, item.name, item.avatar, item.url);
-            }
-        });
+        _saveFollows(items); renderFollowList();
+        items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online') showPageToast(item.platform, item.name, item.avatar, item.url); });
     }
 
     // ==================== 弹幕连接模块 ====================
     function startDouyuDanmaku(roomId) {
-        if (!danmakuEnabled || !roomId) return;
-        if (douyuConnecting) return;
+        if (!danmakuEnabled || !roomId || douyuConnecting) return;
         douyuConnecting = true;
-
         if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-        function enc(payload) {
-            const body = new TextEncoder().encode(payload);
-            const PackLen = body.length + 9;
-            const buf = new ArrayBuffer(body.length + 13);
-            const v = new DataView(buf);
-            v.setUint32(0, PackLen, true); v.setUint32(4, PackLen, true);
-            v.setUint16(8, 689, true); v.setUint8(10, 0); v.setUint8(11, 0);
-            new Uint8Array(buf, 12).set(body);
-            v.setUint8(12 + body.length, 0);
-            return buf;
-        }
-        function parseSTT(s) {
-            const r = {};
-            s.split('/').forEach(p => {
-                const i = p.indexOf('@=');
-                if (i >= 0) r[p.slice(0,i)] = p.slice(i+2).replace(/@S/g,'/').replace(/@A/g,'@');
-            });
-            return r;
-        }
+        const enc = (p) => { const b = new TextEncoder().encode(p); const a = new ArrayBuffer(b.length+13); const v = new DataView(a); v.setUint32(0,b.length+9,true); v.setUint32(4,b.length+9,true); v.setUint16(8,689,true); v.setUint8(10,0); v.setUint8(11,0); new Uint8Array(a,12).set(b); v.setUint8(12+b.length,0); return a; };
+        const parse = (s) => { const r={}; s.split('/').forEach(p=>{ const i=p.indexOf('@='); if(i>=0) r[p.slice(0,i)]=p.slice(i+2).replace(/@S/g,'/').replace(/@A/g,'@'); }); return r; };
         const ws = new WebSocket('wss://danmuproxy.douyu.com:8506/');
-        ws.binaryType = 'arraybuffer';
-        dmWs = ws;
-        ws.onopen = () => {
-            douyuConnecting = false;
-            ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
-            ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
-            ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(enc('type@=mrkl/')); }, 45000);
-        };
-        ws.onmessage = (e) => {
-            const data = new Uint8Array(e.data);
-            let offset = 0;
-            while (offset + 13 <= data.length) {
-                const v = new DataView(data.buffer, data.byteOffset + offset);
-                const packLen = v.getUint32(0, true);
-                if (packLen < 9 || offset + 4 + packLen > data.length) break;
-                const body = new TextDecoder('utf-8', {fatal:false}).decode(data.slice(offset+12, offset+4+packLen-1));
-                const msg = parseSTT(body);
-                if (msg.type === 'chatmsg' && msg.txt) {
-                    const nick = msg.nn || '匿名用户';
-                    const txt = msg.txt.replace(/@S/g, '/').replace(/@A/g, '@');
-                    addChatMessage(nick, txt);
-                }
-                offset += 4 + packLen;
-            }
-        };
-        ws.onclose = () => { 
-            douyuConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
-            if (dmWs === ws && danmakuEnabled) {
-                setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startDouyuDanmaku(roomId); }, 3000); 
-            }
-        };
-        ws.onerror = () => { douyuConnecting = false; if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } };
+        ws.binaryType = 'arraybuffer'; dmWs = ws;
+        ws.onopen = () => { douyuConnecting = false; ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`)); ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`)); ws._hb = setInterval(()=>{ if(ws.readyState===1) ws.send(enc('type@=mrkl/')); }, 45000); };
+        ws.onmessage = e => { const d = new Uint8Array(e.data); let o=0; while(o+13<=d.length){ const v=new DataView(d.buffer,d.byteOffset+o); const l=v.getUint32(0,true); if(l<9||o+4+l>d.length) break; const body=new TextDecoder().decode(d.slice(o+12,o+4+l-1)); const m=parse(body); if(m.type==='chatmsg'&&m.txt) addChatMessage(m.nn||'匿名用户',m.txt.replace(/@S/g,'/').replace(/@A/g,'@')); o+=4+l; } };
+        ws.onclose = () => { douyuConnecting=false; clearInterval(ws._hb); if(dmWs===ws&&danmakuEnabled) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startDouyuDanmaku(roomId); },3000); };
+        ws.onerror = () => { douyuConnecting=false; clearInterval(ws._hb); };
     }
 
+    // 虎牙 Tars 解析
     function tarsReader(ab) {
-        const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab);
-        let pos = 0;
-        function readHead() {
-            if (pos >= buf.length) return null;
-            let b = buf[pos++]; let tag = (b >> 4) & 0xF; let type = b & 0xF;
-            if (tag === 15) { if (pos >= buf.length) return null; tag = buf[pos++]; }
-            return { tag, type };
-        }
-        function readRawInt() {
-            const h = readHead(); if (!h) return 0;
-            switch (h.type) {
-                case 12: return 0;
-                case 0: return buf[pos++];
-                case 1: return (buf[pos++] << 8) | buf[pos++];
-                case 2: return (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
-                case 3: {
-                    const hi = (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
-                    const lo = (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
-                    return hi * 4294967296 + (lo >>> 0);
-                }
-                default: return 0;
-            }
-        }
-        function skipField(type) {
-            switch (type) {
-                case 0: pos++; break;
-                case 1: pos += 2; break;
-                case 2: pos += 4; break;
-                case 3: pos += 8; break;
-                case 4: pos += 4; break;
-                case 5: pos += 8; break;
-                case 6: pos += buf[pos] + 1; break;
-                case 7: { const len = (buf[pos] << 24) | (buf[pos+1] << 16) | (buf[pos+2] << 8) | buf[pos+3]; pos += 4 + len; break; }
-                case 8: { const n = readRawInt(); for (let i = 0; i < 2 * n; i++) { const h = readHead(); if (h) skipField(h.type); } break; }
-                case 9: { const n = readRawInt(); for (let i = 0; i < n; i++) { const h = readHead(); if (h) skipField(h.type); } break; }
-                case 10: skipToStructEnd(); break;
-                case 11: case 12: break;
-                case 13: readHead(); const l = readRawInt(); pos += l; break;
-            }
-        }
-        function skipToStructEnd() { while (pos < buf.length) { const h = readHead(); if (!h || h.type === 11) return; skipField(h.type); } }
-        function skipToTag(targetTag) {
-            while (pos < buf.length) {
-                const saved = pos; const h = readHead(); if (!h) return null;
-                if (h.tag === targetTag) return h;
-                if (h.tag > targetTag || h.type === 11) { pos = saved; return null; }
-                skipField(h.type);
-            }
-            return null;
-        }
-        function readInt(tag) {
-            const h = skipToTag(tag); if (!h) return 0;
-            switch (h.type) {
-                case 12: return 0;
-                case 0: return buf[pos++];
-                case 1: return (buf[pos++] << 8) | buf[pos++];
-                case 2: return (buf[pos++] << 24) | (buf[pos++] << 16) | (buf[pos++] << 8) | buf[pos++];
-                default: skipField(h.type); return 0;
-            }
-        }
-        function readBytes(tag) {
-            const h = skipToTag(tag); if (!h || h.type !== 13) { if (h) skipField(h.type); return null; }
-            readHead(); const n = readRawInt(); const bytes = buf.slice(pos, pos + n); pos += n; return bytes;
-        }
-        function readString(tag) {
-            const h = skipToTag(tag); if (!h) return '';
-            let len;
-            if (h.type === 6) len = buf[pos++];
-            else if (h.type === 7) { len = (buf[pos] << 24) | (buf[pos+1] << 16) | (buf[pos+2] << 8) | buf[pos+3]; pos += 4; }
-            else { skipField(h.type); return ''; }
-            const s = new TextDecoder().decode(buf.slice(pos, pos + len)); pos += len; return s;
-        }
-        function readStructBegin(tag) { const h = skipToTag(tag); return h && h.type === 10; }
-        return { readInt, readBytes, readString, readStructBegin, skipToStructEnd };
+        const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab); let pos = 0;
+        function rH() { if(pos>=buf.length) return null; let b=buf[pos++], t=(b>>4)&0xF, y=b&0xF; if(t===15){ if(pos>=buf.length) return null; t=buf[pos++]; } return {tag:t,type:y}; }
+        function rRI() { const h=rH(); if(!h) return 0; switch(h.type){ case 12: return 0; case 0: return buf[pos++]; case 1: return (buf[pos++]<<8)|buf[pos++]; case 2: return (buf[pos++]<<24)|(buf[pos++]<<16)|(buf[pos++]<<8)|buf[pos++]; case 3: const hi=(buf[pos++]<<24)|(buf[pos++]<<16)|(buf[pos++]<<8)|buf[pos++]; const lo=(buf[pos++]<<24)|(buf[pos++]<<16)|(buf[pos++]<<8)|buf[pos++]; return hi*4294967296+(lo>>>0); default: return 0; } }
+        function sF(ty){ switch(ty){ case 0: pos++; break; case 1: pos+=2; break; case 2: pos+=4; break; case 3: pos+=8; break; case 4: pos+=4; break; case 5: pos+=8; break; case 6: pos+=buf[pos]+1; break; case 7: const l=(buf[pos]<<24)|(buf[pos+1]<<16)|(buf[pos+2]<<8)|buf[pos+3]; pos+=4+l; break; case 8: const n=rRI(); for(let i=0;i<2*n;i++){ const h=rH(); if(h) sF(h.type); } break; case 9: const n9=rRI(); for(let i=0;i<n9;i++){ const h=rH(); if(h) sF(h.type); } break; case 10: sE(); break; case 13: rH(); const l13=rRI(); pos+=l13; break; } }
+        function sE() { while(pos<buf.length){ const h=rH(); if(!h||h.type===11) return; sF(h.type); } }
+        function sT(tg){ while(pos<buf.length){ const sav=pos; const h=rH(); if(!h) return null; if(h.tag===tg) return h; if(h.tag>tg||h.type===11){ pos=sav; return null; } sF(h.type); } return null; }
+        function rI(tg){ const h=sT(tg); if(!h) return 0; switch(h.type){ case 12: return 0; case 0: return buf[pos++]; case 1: return (buf[pos++]<<8)|buf[pos++]; case 2: return (buf[pos++]<<24)|(buf[pos++]<<16)|(buf[pos++]<<8)|buf[pos++]; default: sF(h.type); return 0; } }
+        function rB(tg){ const h=sT(tg); if(!h||h.type!==13){ if(h) sF(h.type); return null; } rH(); const n=rRI(); const bytes=buf.slice(pos,pos+n); pos+=n; return bytes; }
+        function rS(tg){ const h=sT(tg); if(!h) return ''; let l; if(h.type===6) l=buf[pos++]; else if(h.type===7){ l=(buf[pos]<<24)|(buf[pos+1]<<16)|(buf[pos+2]<<8)|buf[pos+3]; pos+=4; } else{ sF(h.type); return ''; } const s=new TextDecoder().decode(buf.slice(pos,pos+l)); pos+=l; return s; }
+        function rSB(tg){ const h=sT(tg); return h&&h.type===10; }
+        return { readInt:rI, readBytes:rB, readString:rS, readStructBegin:rSB, skipToStructEnd:sE };
     }
 
     function parseHuyaMsg(data) {
-        const r = tarsReader(data.buffer || data); if (r.readInt(0) !== 7) return;
-        const vData = r.readBytes(1); if (!vData || !vData.length) return;
-        const r2 = tarsReader(vData); r2.readInt(0); if (r2.readInt(1) !== 1400) return;
-        const sMsg = r2.readBytes(2); let nick = r2.readString(4) || '虎牙网友';
-        if (!sMsg || !sMsg.length) return;
-        const r3 = tarsReader(sMsg);
-        if (nick === '虎牙网友' && r3.readStructBegin(0)) { r3.readInt(0); r3.readInt(1); const innerNick = r3.readString(2); if (innerNick) nick = innerNick; r3.skipToStructEnd(); }
-        const sContent = r3.readString(3); if (sContent) addChatMessage(nick, sContent);
+        const r = tarsReader(data.buffer||data); if(r.readInt(0)!==7) return;
+        const v = r.readBytes(1); if(!v||!v.length) return;
+        const r2 = tarsReader(v); r2.readInt(0); if(r2.readInt(1)!==1400) return;
+        const m = r2.readBytes(2); let nick = r2.readString(4)||'虎牙网友';
+        if(!m||!m.length) return;
+        const r3 = tarsReader(m);
+        if(nick==='虎牙网友'&&r3.readStructBegin(0)){ r3.readInt(0); r3.readInt(1); const nn=r3.readString(2); if(nn) nick=nn; r3.skipToStructEnd(); }
+        const txt = r3.readString(3); if(txt) addChatMessage(nick, txt);
     }
 
     function startHuyaDanmaku(config) {
-        if (!config || !config.ayyuid) return;
-        if (huyaConnecting) return;
+        if(!config||!config.ayyuid||huyaConnecting) return;
         huyaConnecting = true;
-
-        const { ayyuid, topSid, subSid } = config;
-        function tarsOut() {
-            const bytes = [];
-            function wHead(tag, type) { if (tag < 15) bytes.push((tag << 4) | type); else { bytes.push(0xF0 | type); bytes.push(tag); } }
-            function wInt8(tag, v) { if (v === 0) wHead(tag, 12); else { wHead(tag, 0); bytes.push(v & 0xFF); } }
-            function wInt16(tag, v) { if (v >= -128 && v <= 127) wInt8(tag, v); else { wHead(tag, 1); bytes.push((v >> 8) & 0xFF, v & 0xFF); } }
-            function wInt32(tag, v) { if (v >= -32768 && v <= 32767) wInt16(tag, v); else { wHead(tag, 2); bytes.push((v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF); } }
-            function wInt64(tag, v) {
-                if (v >= -2147483648 && v <= 2147483647) wInt32(tag, v);
-                else {
-                    wHead(tag, 3); const hi = Math.floor(v / 0x100000000); const lo = v >>> 0;
-                    bytes.push((hi >> 24) & 0xFF, (hi >> 16) & 0xFF, (hi >> 8) & 0xFF, hi & 0xFF, (lo >> 24) & 0xFF, (lo >> 16) & 0xFF, (lo >> 8) & 0xFF, lo & 0xFF);
-                }
-            }
-            function wBool(tag, v) { wInt8(tag, v ? 1 : 0); }
-            function wStr(tag, s) {
-                const b = new TextEncoder().encode(s);
-                if (b.length <= 255) { wHead(tag, 6); bytes.push(b.length); }
-                else { const l = b.length; wHead(tag, 7); bytes.push((l >> 24) & 0xFF, (l >> 16) & 0xFF, (l >> 8) & 0xFF, l & 0xFF); }
-                for (let i = 0; i < b.length; i++) bytes.push(b[i]);
-            }
-            function wBytes(tag, inner) { wHead(tag, 13); wHead(0, 0); wInt32(0, inner.length); for (let i = 0; i < inner.length; i++) bytes.push(inner[i]); }
-            return { wInt64, wBool, wStr, wBytes, get: () => bytes };
-        }
-        function buildRegister() {
-            const oos = tarsOut(); oos.wInt64(0, ayyuid); oos.wBool(1, ayyuid === 0); oos.wStr(2, 'web_' + Date.now()); oos.wStr(3, ''); oos.wInt64(4, topSid); oos.wInt64(5, subSid); oos.wInt64(6, ayyuid); oos.wInt64(7, 3);
-            const wscmd = tarsOut(); wscmd.wInt64(0, 1); wscmd.wBytes(1, oos.get()); return new Uint8Array(wscmd.get()).buffer;
-        }
-        const HB = Uint8Array.from(atob('ABQdAAwsNgBM'), c => c.charCodeAt(0));
-        const ws = new WebSocket('wss://cdnws.api.huya.com');
-        ws.binaryType = 'arraybuffer';
-        dmWs = ws;
-        ws.onopen = () => {
-            huyaConnecting = false; ws.send(buildRegister());
-            ws._hbTimer = setInterval(() => { if (ws.readyState === 1) ws.send(HB); }, 60000);
-        };
-        ws.onmessage = (e) => { try { parseHuyaMsg(new Uint8Array(e.data)); } catch(err) {} };
-        ws.onclose = () => { 
-            huyaConnecting = false;
-            if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; }
-            if (dmWs === ws && danmakuEnabled) {
-                setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startHuyaDanmaku(config); }, 3000);
-            } 
-        };
-        ws.onerror = () => { huyaConnecting = false; if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } };
+        const {ayyuid, topSid, subSid} = config;
+        const tO = () => { const b=[]; const wH=(t,y)=>{ if(t<15) b.push((t<<4)|y); else{ b.push(0xF0|y); b.push(t); } };
+            const w8=(t,v)=>{ if(v===0) wH(t,12); else{ wH(t,0); b.push(v&0xFF); } };
+            const w16=(t,v)=>{ if(v>=-128&&v<=127) w8(t,v); else{ wH(t,1); b.push((v>>8)&0xFF,v&0xFF); } };
+            const w32=(t,v)=>{ if(v>=-32768&&v<=32767) w16(t,v); else{ wH(t,2); b.push((v>>24)&0xFF,(v>>16)&0xFF,(v>>8)&0xFF,v&0xFF); } };
+            const w64=(t,v)=>{ if(v>=-2147483648&&v<=2147483647) w32(t,v); else{ wH(t,3); const hi=Math.floor(v/0x100000000), lo=v>>>0; b.push((hi>>24)&0xFF,(hi>>16)&0xFF,(hi>>8)&0xFF,hi&0xFF,(lo>>24)&0xFF,(lo>>16)&0xFF,(lo>>8)&0xFF,lo&0xFF); } };
+            const wB=(t,v)=>{ w8(t,v?1:0); };
+            const wS=(t,s)=>{ const e=new TextEncoder().encode(s); if(e.length<=255){ wH(t,6); b.push(e.length); }else{ const l=e.length; wH(t,7); b.push((l>>24)&0xFF,(l>>16)&0xFF,(l>>8)&0xFF,l&0xFF); } for(let i=0;i<e.length;i++) b.push(e[i]); };
+            const wBy=(t,i)=>{ wH(t,13); wH(0,0); w32(0,i.length); for(let j=0;j<i.length;j++) b.push(i[j]); };
+            return { wInt64:w64, wBool:wB, wStr:wS, wBytes:wBy, get:()=>b }; };
+        const reg = () => { const o=tO(); o.wInt64(0,ayyuid); o.wBool(1,ayyuid===0); o.wStr(2,'web_'+Date.now()); o.wStr(3,''); o.wInt64(4,topSid); o.wInt64(5,subSid); o.wInt64(6,ayyuid); o.wInt64(7,3);
+            const c=tO(); c.wInt64(0,1); c.wBytes(1,o.get()); return new Uint8Array(c.get()).buffer; };
+        const HB = Uint8Array.from(atob('ABQdAAwsNgBM'), c=>c.charCodeAt(0));
+        const ws = new WebSocket('wss://cdnws.api.huya.com'); ws.binaryType='arraybuffer'; dmWs=ws;
+        ws.onopen = () => { huyaConnecting=false; ws.send(reg()); ws._hb=setInterval(()=>{ if(ws.readyState===1) ws.send(HB); },60000); };
+        ws.onmessage = e => { try{ parseHuyaMsg(new Uint8Array(e.data)); } catch(err){} };
+        ws.onclose = () => { huyaConnecting=false; clearInterval(ws._hb); if(dmWs===ws&&danmakuEnabled) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startHuyaDanmaku(config); },3000); };
+        ws.onerror = () => { huyaConnecting=false; clearInterval(ws._hb); };
     }
 
     function startDouyinDanmaku(roomId) {
-        if (!danmakuEnabled || !roomId) return;
-        if (douyinConnecting) return;
+        if(!danmakuEnabled||!roomId||douyinConnecting) return;
         douyinConnecting = true;
-
-        if (douyinWs) {
-            if (douyinWs._heartbeat) clearInterval(douyinWs._heartbeat);
-            try { douyinWs.close(); } catch(e) {} douyinWs = null;
-        }
-        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/douyin/' + roomId;
-        const ws = new WebSocket(wsUrl);
-        douyinWs = ws;
-        ws.onopen = () => {
-            douyinConnecting = false; addChatMessage('系统', '弹幕连接成功！');
-            ws._heartbeat = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._heartbeat);
-            }, 15000);
-        };
-        ws.onmessage = (event) => {
-            if (event.data === 'pong') return;
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.method !== 'WebcastChatMessage' || msg.chatBy === '9') return;
-                const nick = (msg.user && msg.user.nickname) || '匿名用户';
-                const content = msg.content || '';
-                if (content.trim()) addChatMessage(nick, content);
-            } catch(e) {}
-        };
-        ws.onclose = () => {
-            douyinConnecting = false;
-            if (ws._heartbeat) { clearInterval(ws._heartbeat); ws._heartbeat = null; }
-            if (douyinWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startDouyinDanmaku(roomId); }, 3000);
-            }
-        };
-        ws.onerror = () => { douyinConnecting = false; };
+        if(douyinWs){ clearInterval(douyinWs._hb); try{douyinWs.close();}catch(e){} douyinWs=null; }
+        const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/douyin/'+roomId);
+        douyinWs=ws;
+        ws.onopen = () => { douyinConnecting=false; addChatMessage('系统','弹幕连接成功！'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },15000); };
+        ws.onmessage = e => { if(e.data==='pong') return; try{ const m=JSON.parse(e.data); if(m.method==='WebcastChatMessage'&&m.chatBy!=='9') addChatMessage((m.user?.nickname)||'匿名用户', m.content||''); } catch(err){} };
+        ws.onclose = () => { douyinConnecting=false; clearInterval(ws._hb); if(douyinWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('douyin.com')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startDouyinDanmaku(roomId); },3000); };
+        ws.onerror = () => { douyinConnecting=false; };
     }
 
     function startTwitchDanmaku(channelName) {
-        if (!danmakuEnabled || !channelName) return;
-        if (twitchConnecting) return;
+        if(!danmakuEnabled||!channelName||twitchConnecting) return;
         twitchConnecting = true;
-
-        if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
-        const wsUrl = API_BASE.replace(/^http/, 'ws') + '/ws/twitch/' + channelName;
-        const ws = new WebSocket(wsUrl);
-        twitchWs = ws;
-        ws.onopen = () => {
-            twitchConnecting = false; addChatMessage('系统', `✔ Twitch 弹幕已连线`);
-            ws._heartbeat = setInterval(() => {
-                if (ws.readyState === WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._heartbeat);
-            }, 30000);
-        };
-        ws.onmessage = (event) => {
-            if (typeof event.data === 'string' && event.data.includes('pong')) return;
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.nick && msg.content) addChatMessage(msg.nick, msg.content);
-            } catch(e) {}
-        };
-        ws.onerror = () => { twitchConnecting = false; };
-        ws.onclose = () => {
-            twitchConnecting = false; if (ws._heartbeat) clearInterval(ws._heartbeat);
-            if (twitchWs === ws && danmakuEnabled && lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
-                setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) startTwitchDanmaku(channelName); }, 3000);
-            }
-        };
+        if(twitchWs){ try{twitchWs.close();}catch(e){} twitchWs=null; }
+        const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName);
+        twitchWs=ws;
+        ws.onopen = () => { twitchConnecting=false; addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); };
+        ws.onmessage = e => { if(typeof e.data==='string'&&e.data.includes('pong')) return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
+        ws.onerror = () => { twitchConnecting=false; };
+        ws.onclose = () => { twitchConnecting=false; clearInterval(ws._hb); if(twitchWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('twitch.tv')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startTwitchDanmaku(channelName); },3000); };
     }
 
     function addChatMessage(nick, text) {
-        if (!danmakuEnabled || currentTab !== 'danmaku') return;
-        if (!text || !text.trim() || !chatMessagesDiv) return;
-
-        const emptyTip = chatMessagesDiv.querySelector('.empty-chat');
-        if (emptyTip) emptyTip.remove();
-
-        const isNearBottom = chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80;
-        const shouldScroll = isNearBottom || document.hidden;
-
-        const msgEl = document.createElement('div');
-        msgEl.className = 'chat-msg';
-        msgEl.innerHTML = `<span class="chat-nick">${escapeHtml(nick.substring(0,30))}</span><span class="chat-text">${escapeHtml(text.substring(0,200))}</span>`;
-        chatMessagesDiv.appendChild(msgEl);
-
-        while (chatMessagesDiv.children.length > CHAT_MAX) {
-            chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
-        }
-        
-        if (shouldScroll) {
-            chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
-        }
+        if(!danmakuEnabled||currentTab!=='danmaku'||!text?.trim()||!chatMessagesDiv) return;
+        chatMessagesDiv.querySelector('.empty-chat')?.remove();
+        const el = document.createElement('div'); el.className='chat-msg';
+        el.innerHTML = `<span class="chat-nick">${escapeHtml(nick.substring(0,30))}</span><span class="chat-text">${escapeHtml(text.substring(0,200))}</span>`;
+        chatMessagesDiv.appendChild(el);
+        while(chatMessagesDiv.children.length > CHAT_MAX) chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
+        if(chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 80 || document.hidden) chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
     }
 
-    // ==================== 播放器核心 (已优化 MSE 安全解绑) ====================
-    function ensureHttps(url) {
-        if (!url) return url;
-        if (url.startsWith('https://')) return url;
-        if (url.startsWith('http://')) return url.replace('http://', 'https://');
-        return url;
-    }
-
+    // ==================== 播放器核心 ====================
+    function ensureHttps(url) { if(!url) return url; return url.startsWith('https://')?url:url.replace('http://','https://'); }
     function getProxyUrl(originalUrl) {
-        if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
-        const NEED_PROXY = ['ttvnw.net', 'twitch.tv', 'twitchsvc.net', 'sooplive.com', 'sooplive.net', 'livestream-manager.sooplive.com', 'pandalive.co.kr', 'pandalivecdn.com'];
-        if (currentPlatform === 'PandaTV' || NEED_PROXY.some(domain => originalUrl.includes(domain))) {
-            let referer = 'https://play.sooplive.com';
-            if (currentPlatform === 'Twitch') referer = 'https://player.twitch.tv';
-            else if (currentPlatform === 'PandaTV') referer = 'https://www.pandalive.co.kr/';
-            return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(referer)}`;
+        if(originalUrl.startsWith(CF_WORKER)) return originalUrl;
+        const NEED = ['ttvnw.net','twitch.tv','twitchsvc.net','sooplive.com','sooplive.net','livestream-manager.sooplive.com','pandalive.co.kr','pandalivecdn.com'];
+        if(currentPlatform==='PandaTV'||NEED.some(d=>originalUrl.includes(d))){
+            let ref = 'https://play.sooplive.com';
+            if(currentPlatform==='Twitch') ref='https://player.twitch.tv';
+            else if(currentPlatform==='PandaTV') ref='https://www.pandalive.co.kr/';
+            return `${CF_WORKER}?url=${encodeURIComponent(originalUrl)}&referer=${encodeURIComponent(ref)}`;
         }
         return originalUrl;
     }
 
     async function goWithUrl(raw) {
-        if (!raw) return;
-        if (window._reParseLock) {
-            console.log("[防抖] 正在重连冷却中，跳过本次请求");
-            return;
-        }
-        window._reParseLock = true;
-        setTimeout(() => { window._reParseLock = false; }, 2000);
-
+        if(!raw || window._reParseLock) return;
+        window._reParseLock = true; setTimeout(()=>{ window._reParseLock=false; },2000);
         setBtn(true);
-        if (chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
+        if(chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
 
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
         lastRoomUrl = isCDN ? '' : raw;
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
-        if (!isCDN && (raw.includes('huya.com') || raw.includes('douyu.com') || raw.includes('bilibili.com') || raw.includes('douyin.com') || raw.includes('twitch.tv') || raw.includes('pandalive.co.kr') || raw.includes('sooplive.com'))) {
-            try {
-                const _sc2 = raw.includes('sooplive.com') ? getSoopCookie() : '';
-                const _tc2 = raw.includes('twitch.tv') ? getTwitchCookie() : '';
-                const _ck2 = _sc2 || _tc2;
-                const _pu2 = `${API_BASE}/api/parse?url=${encodeURIComponent(raw)}` + (_ck2 ? `&cookie=${encodeURIComponent(_ck2)}` : '');
-                const resp = await fetch(_pu2);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        if(!isCDN && (raw.includes('huya.com')||raw.includes('douyu.com')||raw.includes('bilibili.com')||raw.includes('douyin.com')||raw.includes('twitch.tv')||raw.includes('pandalive.co.kr')||raw.includes('sooplive.com'))){
+            try{
+                const ck = (raw.includes('sooplive.com')?getSoopCookie():'')||(raw.includes('twitch.tv')?getTwitchCookie():'');
+                const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`+(ck?`&cookie=${encodeURIComponent(ck)}`:''));
+                if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
-                if (data.error) throw new Error(data.error);
-
-                if (data.streams && data.streams.length) {
-                    streams = data.streams.map(s => ({ ...s, url: ensureHttps(s.url) }));
+                if(data.error) throw new Error(data.error);
+                if(data.streams?.length){
+                    streams = data.streams.map(s=>({...s, url:ensureHttps(s.url)}));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     updateFavicon(currentAvatar);
                     dmConfig = data.danmaku || null;
-                    if (raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
-                    if (raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
+                    if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
+                    if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
                 } else {
-                    alert(`解析失败：${data?.error || '主播可能未开播或链接无效，请检查后重试'}`);
+                    alert(`解析失败：${data?.error||'主播可能未开播或链接无效'}`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName);
-                    setBtn(false);
-                    window._reParseLock = false;
-                    return;
+                    setBtn(false); return;
                 }
-            } catch(e) {
-                if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
-                    if (!window._networkRetryCount) window._networkRetryCount = 0;
-                    if (window._networkRetryCount < 2) {
-                        window._networkRetryCount++;
-                        setBtn(true);
-                        setTimeout(() => goWithUrl(raw), window._networkRetryCount * 2000);
-                        return;
-                    }
+            } catch(e){
+                if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
+                    if(!window._networkRetryCount) window._networkRetryCount=0;
+                    if(window._networkRetryCount < 2){ window._networkRetryCount++; setBtn(true); setTimeout(()=>goWithUrl(raw), window._networkRetryCount*2000); return; }
                 }
-                window._networkRetryCount = 0;
-                setBtn(false);
-                window._reParseLock = false;
-                return;
+                window._networkRetryCount=0; setBtn(false); return;
             }
-        } else if (isCDN) {
+        } else if(isCDN){
             const fileName = raw.split('/').pop().split('?')[0] || '直链';
-            streams = [{ cdn: '直链', url: ensureHttps(raw), type: raw.includes('.m3u8') ? 'm3u8' : 'flv' }];
-            currentAnchorName = fileName;
-            currentAvatar = '';
-            currentPlatform = '直链';
-            dmConfig = null;
-            updateFavicon(null);
-        } else {
-            setBtn(false);
-            window._reParseLock = false;
-            return;
-        }
+            streams = [{ cdn:'直链', url:ensureHttps(raw), type: raw.includes('.m3u8')?'m3u8':'flv' }];
+            currentAnchorName = fileName; currentAvatar=''; currentPlatform='直链'; dmConfig=null; updateFavicon(null);
+        } else { setBtn(false); return; }
 
         updatePageTitle(currentAnchorName, currentPlatform);
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
-        window._networkRetryCount = 0;
         playStream(streams);
         setBtn(false);
-        window._reParseLock = false;
     }
 
     function playStream(streams) {
-        // 安全且彻底的 MSE 与 DOM 重置
-        if (art) {
-            try {
-                if (art.video) {
-                    art.video.pause();
-                    // 安全解除 MSE 绑定，避免 DOMException
-                    if (art.video.srcObject) art.video.srcObject = null;
-                    art.video.removeAttribute('src');
-                }
+        // 安全销毁旧播放器
+        if(art){
+            try{
+                if(art.video){ art.video.pause(); if(art.video.srcObject) art.video.srcObject=null; art.video.removeAttribute('src'); }
                 art.destroy(true);
-            } catch(e){ console.warn("Artplayer销毁异常:", e); }
+            } catch(e){ console.warn('Artplayer销毁异常:', e); }
             art = null;
         }
-        if (window._hlsInst) {
-            try {
-                window._hlsInst.stopLoad();
-                window._hlsInst.detachMedia();
-                window._hlsInst.destroy();
-            } catch(e){}
-            window._hlsInst = null;
-        }
-        // 清理可能残留的 mpegts 实例
-        const oldVideo = document.querySelector('#player video');
-        if (oldVideo && oldVideo._mpegts) {
-            try {
-                oldVideo._mpegts.pause();
-                oldVideo._mpegts.unload();
-                oldVideo._mpegts.detachMediaElement(); // 内部会安全清理 SourceBuffer
-                oldVideo._mpegts.destroy();
-            } catch(e){}
-            oldVideo._mpegts = null;
-        }
+        if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
+        const ov = document.querySelector('#player video');
+        if(ov?._mpegts){ try{ ov._mpegts.pause(); ov._mpegts.unload(); ov._mpegts.detachMediaElement(); ov._mpegts.destroy(); } catch(e){} ov._mpegts=null; }
         document.getElementById('player').innerHTML = '';
 
         let defaultIndex = 0;
-        if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
-            let safeIndex = streams.findIndex(s => s.cdn && s.cdn.toLowerCase().includes('1080'));
-            if (safeIndex === -1) safeIndex = streams.findIndex(s => s.cdn && (s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('high')));
-            if (safeIndex !== -1) defaultIndex = safeIndex;
-            else if (streams.length > 1) defaultIndex = 1;
+        if(lastRoomUrl?.includes('twitch.tv')){
+            let si = streams.findIndex(s=>s.cdn?.toLowerCase().includes('1080'));
+            if(si===-1) si = streams.findIndex(s=>s.cdn?.toLowerCase().includes('720')||s.cdn?.toLowerCase().includes('high'));
+            if(si!==-1) defaultIndex=si; else if(streams.length>1) defaultIndex=1;
         }
-
-        const sDefault = streams[defaultIndex] || streams[0];
-        const artType = sDefault.type === 'flv' ? 'flv' : (sDefault.type === 'm3u8' ? 'm3u8' : '');
-        const qualityList = streams.map((s, i) => ({
-            default: i === defaultIndex,
-            html: s.cdn,
-            url: getProxyUrl(s.url),
-            type: s.type || ''
-        }));
+        const sDefault = streams[defaultIndex]||streams[0];
+        const artType = sDefault.type==='flv'?'flv':(sDefault.type==='m3u8'?'m3u8':'');
+        const qualityList = streams.map((s,i)=>({ default:i===defaultIndex, html:s.cdn, url:getProxyUrl(s.url), type:s.type||'' }));
 
         art = new Artplayer({
-            container: '#player',
-            url: getProxyUrl(sDefault.url),
-            type: artType,
-            isLive: true,
-            autoplay: true,
-            muted: savedMuted,
-            volume: savedVolume,
-            setting: false,
-            pip: true,
-            screenshot: false,
-            playbackRate: false,
-            aspectRatio: false,
-            fullscreenWeb: true,
-            lang: 'zh-cn',
-            quality: qualityList,
+            container:'#player', url:getProxyUrl(sDefault.url), type:artType, isLive:true, autoplay:true,
+            muted:savedMuted, volume:savedVolume, setting:false, pip:true, screenshot:false,
+            playbackRate:false, aspectRatio:false, fullscreenWeb:true, lang:'zh-cn', quality:qualityList,
             customType: {
                 flv: function(video, url) {
-                    if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
-                    
-                    // 防御性清理
-                    if (video._mpegts) {
-                        try {
-                            video._mpegts.pause();
-                            video._mpegts.unload();
-                            video._mpegts.detachMediaElement();
-                            video._mpegts.destroy();
-                        } catch(e){}
-                        video._mpegts = null;
+                    if(video._stallTimer){ clearInterval(video._stallTimer); video._stallTimer=null; }
+                    if(video._mpegts){
+                        try{ video._mpegts.pause(); video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){}
+                        video._mpegts=null;
                     }
+                    video._playerIdCounter = (video._playerIdCounter||0)+1;
+                    const playerId = video._playerIdCounter;   // 【修复 playerId 未定义】
+                    video._playerId = playerId;
 
-                    const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
-                        enableWorker: true,
-                        enableStashBuffer: false,
-                        stashInitialSize: 128,
-                        liveBufferLatencyChasing: true,
-                        liveBufferLatencyMaxLatency: 5.0,
-                        liveBufferLatencyMinRemain: 0.5,
-                        autoCleanupSourceBuffer: false,
-                        lazyLoad: false,
-                        reconnectInterval: 0,
-                        reconnectAttempts: 0,
-                        fixAudioTimestampGap: false
+                    const player = mpegts.createPlayer({ type:'flv', url:url, isLive:true }, {
+                        enableWorker:true, enableStashBuffer:false, stashInitialSize:128,
+                        liveBufferLatencyChasing:true, liveBufferLatencyMaxLatency:5.0, liveBufferLatencyMinRemain:0.5,
+                        autoCleanupSourceBuffer:false, lazyLoad:false, reconnectInterval:0, reconnectAttempts:0,
+                        fixAudioTimestampGap:false
                     });
-                    
-                    player.attachMediaElement(video);
-                    player.load();
-                    video._mpegts = player;
-
+                    player.attachMediaElement(video); player.load(); video._mpegts = player;
                     video._reParseCount = 0;
-                    let lastTime = -1, stallCount = 0;
+                    let lastTime=-1, stallCount=0;
                     video._stallTimer = setInterval(() => {
-                        if (video._playerId !== playerId || !art || !video) {
-                            clearInterval(video._stallTimer);
-                            video._stallTimer = null;
-                            return;
-                        }
+                        if(video._playerId!==playerId||!art||!video){ clearInterval(video._stallTimer); video._stallTimer=null; return; }
                         const ct = video.currentTime;
-                        if (ct === lastTime && !video.paused && !video.ended) {
+                        if(ct===lastTime && !video.paused && !video.ended){
                             stallCount++;
-                            if (stallCount >= 3) {
-                                clearInterval(video._stallTimer);
-                                video._stallTimer = null;
-                                if (lastRoomUrl) {
-                                    video._reParseCount = (video._reParseCount || 0) + 1;
-                                    if (video._reParseCount <= 3) setTimeout(() => goWithUrl(lastRoomUrl), 500);
-                                    else showOfflineOverlay(currentAnchorName);
-                                }
+                            if(stallCount>=3){
+                                clearInterval(video._stallTimer); video._stallTimer=null;
+                                if(lastRoomUrl){ video._reParseCount=(video._reParseCount||0)+1; if(video._reParseCount<=3) setTimeout(()=>goWithUrl(lastRoomUrl),500); else showOfflineOverlay(currentAnchorName); }
                             }
-                        } else { stallCount = 0; }
+                        } else stallCount=0;
                         lastTime = ct;
                     }, 2500);
-
-                    video.addEventListener('ended', function onFlvEnded() {
-                        if (video._playerId !== playerId || !lastRoomUrl) return;
-                        clearInterval(video._stallTimer);
-                        video._stallTimer = null;
-                        setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
+                    video.addEventListener('ended', function onFlvEnded(){
+                        if(video._playerId!==playerId||!lastRoomUrl) return;
+                        clearInterval(video._stallTimer); video._stallTimer=null;
+                        setTimeout(()=>{ if(lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
                     });
                     player.on(mpegts.Events.ERROR, () => {
-                        if (video._mpegts !== player) return;
-                        clearInterval(video._stallTimer);
-                        video._stallTimer = null;
-                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1500);
+                        if(video._mpegts!==player) return;
+                        clearInterval(video._stallTimer); video._stallTimer=null;
+                        if(lastRoomUrl) setTimeout(()=>goWithUrl(lastRoomUrl), 1500);
                     });
                 },
                 m3u8: function(video, url) {
-                    if (window._hlsInst) {
-                        try {
-                            window._hlsInst.stopLoad();
-                            window._hlsInst.detachMedia();
-                            window._hlsInst.destroy();
-                        } catch(e){}
-                        window._hlsInst = null;
-                    }
-                    if (video._mpegts) {
-                        try {
-                            video._mpegts.pause();
-                            video._mpegts.unload();
-                            video._mpegts.detachMediaElement();
-                            video._mpegts.destroy();
-                        } catch(e){}
-                        video._mpegts = null;
-                    }
-                    
-                    video.removeAttribute('src');
-                    video.load();
-                    
-                    if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
-                    if (video._adWaitTimer) { clearTimeout(video._adWaitTimer); video._adWaitTimer = null; }
+                    if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
+                    if(video._mpegts){ try{ video._mpegts.pause(); video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} video._mpegts=null; }
+                    video.removeAttribute('src'); video.load();
+                    if(video._hlsStallTimer){ clearInterval(video._hlsStallTimer); video._hlsStallTimer=null; }
+                    if(video._adWaitTimer){ clearTimeout(video._adWaitTimer); video._adWaitTimer=null; }
                     video._waitingForAd = false;
-
-                    video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
-                    const hlsId = video._hlsIdCounter;
-                    video._hlsId = hlsId;
-                    video._hlsReParseCount = 0;
-
+                    video._hlsIdCounter = (video._hlsIdCounter||0)+1;
+                    const hlsId = video._hlsIdCounter; video._hlsId = hlsId; video._hlsReParseCount = 0;
                     const startHls = (srcUrl) => {
-                        if (video._hlsId !== hlsId) return;
-                        if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
-
-                        if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                            const hls = new Hls({
-                                liveSyncDurationCount: 3,
-                                liveMaxLatencyDurationCount: 10,
-                                lowLatencyMode: false,
-                                maxBufferLength: 15,
-                                maxMaxBufferLength: 30,
-                                maxBufferSize: 30 * 1000 * 1000
-                            });
-                            hls.loadSource(srcUrl);
-                            hls.attachMedia(video);
+                        if(video._hlsId !== hlsId) return;
+                        if(window._hlsInst){ try{ window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
+                        if(typeof Hls !== 'undefined' && Hls.isSupported()){
+                            const hls = new Hls({ liveSyncDurationCount:3, liveMaxLatencyDurationCount:10, lowLatencyMode:false, maxBufferLength:15, maxMaxBufferLength:30, maxBufferSize:30*1000*1000 });
+                            hls.loadSource(srcUrl); hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.FRAG_BUFFERED, () => {
-                                if (video._waitingForAd === true) {
-                                    video._waitingForAd = false;
-                                    if (video._adWaitTimer) { clearTimeout(video._adWaitTimer); video._adWaitTimer = null; }
-                                    if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition;
-                                    video.play().catch(() => {});
-                                }
+                                if(video._waitingForAd === true){ video._waitingForAd=false; if(video._adWaitTimer){ clearTimeout(video._adWaitTimer); video._adWaitTimer=null; } if(hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition; video.play().catch(()=>{}); }
                             });
                             hls.on(Hls.Events.ERROR, (e, data) => {
-                                if (video._hlsId !== hlsId) return;
-                                if (data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || data.details === 'levelEmptyError') {
-                                    if (!video._waitingForAd) {
-                                        video._waitingForAd = true;
-                                        if (!video.paused) video.pause();
-                                        video._adWaitTimer = setTimeout(() => {
-                                            video._waitingForAd = false;
-                                            video._adWaitTimer = null;
-                                            console.warn('[hls] 广告等待超时，强制重新解析');
-                                            if (lastRoomUrl) goWithUrl(lastRoomUrl);
-                                        }, 30000);
-                                    }
+                                if(video._hlsId !== hlsId) return;
+                                if(data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || data.details === 'levelEmptyError'){
+                                    if(!video._waitingForAd){ video._waitingForAd = true; if(!video.paused) video.pause(); video._adWaitTimer = setTimeout(()=>{ video._waitingForAd=false; video._adWaitTimer=null; console.warn('[hls] 广告等待超时，强制重新解析'); if(lastRoomUrl) goWithUrl(lastRoomUrl); }, 30000); }
                                     return;
                                 }
-                                if (!data.fatal) {
-                                    if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
-                                        try { if (hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition; video.play().catch(() => {}); } catch(err) {}
-                                    }
-                                    return;
-                                }
-                                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                                    if (data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
-                                        hls.currentLevel = -1;
-                                        hls.startLoad();
-                                        video.play().catch(() => {});
-                                        return;
-                                    }
-                                    if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                                        hls.destroy();
-                                        window._hlsInst = null;
-                                        if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
-                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                                        else showOfflineOverlay(currentAnchorName);
-                                        return;
-                                    }
-                                    video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
-                                    if (video._hlsReParseCount <= 2) {
-                                        setTimeout(() => { try { hls.startLoad(); video.play().catch(() => {}); } catch(err) { if (lastRoomUrl) goWithUrl(lastRoomUrl); } }, 2000);
-                                    } else {
-                                        hls.destroy();
-                                        window._hlsInst = null;
-                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                                        else showOfflineOverlay(currentAnchorName);
-                                    }
-                                } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                                    hls.recoverMediaError();
-                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
-                                } else {
-                                    hls.destroy();
-                                    window._hlsInst = null;
-                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
-                                }
+                                if(!data.fatal) return;
+                                if(data.type === Hls.ErrorTypes.NETWORK_ERROR){
+                                    if(data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT){ hls.destroy(); window._hlsInst=null; if(video._hlsStallTimer){ clearInterval(video._hlsStallTimer); video._hlsStallTimer=null; } if(lastRoomUrl) setTimeout(()=>goWithUrl(lastRoomUrl),1000); else showOfflineOverlay(currentAnchorName); return; }
+                                    video._hlsReParseCount = (video._hlsReParseCount||0)+1;
+                                    if(video._hlsReParseCount <= 2){ setTimeout(()=>{ try{ hls.startLoad(); video.play().catch(()=>{}); } catch(err){ if(lastRoomUrl) goWithUrl(lastRoomUrl); } }, 2000); }
+                                    else{ hls.destroy(); window._hlsInst=null; if(lastRoomUrl) setTimeout(()=>goWithUrl(lastRoomUrl),1000); else showOfflineOverlay(currentAnchorName); }
+                                } else if(data.type === Hls.ErrorTypes.MEDIA_ERROR){ hls.recoverMediaError(); setTimeout(()=>{ video.play().catch(()=>{}); },500); }
+                                else{ hls.destroy(); window._hlsInst=null; if(lastRoomUrl) setTimeout(()=>goWithUrl(lastRoomUrl),1000); }
                             });
                             window._hlsInst = hls;
-                        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                            video.src = srcUrl;
-                            video.play();
-                        }
+                        } else if(video.canPlayType('application/vnd.apple.mpegurl')){ video.src = srcUrl; video.play(); }
                     };
-
                     startHls(url);
-
-                    let lastTime = -1, stallCount = 0;
+                    let lastTime=-1, stallCount=0;
                     video._hlsStallTimer = setInterval(() => {
-                        if (video._hlsId !== hlsId || !art || !video) {
-                            clearInterval(video._hlsStallTimer);
-                            video._hlsStallTimer = null;
-                            return;
-                        }
+                        if(video._hlsId !== hlsId || !art || !video){ clearInterval(video._hlsStallTimer); video._hlsStallTimer=null; return; }
                         const ct = video.currentTime;
-                        if (ct === lastTime && !video.paused && !video.ended) {
+                        if(ct === lastTime && !video.paused && !video.ended){
                             stallCount++;
-                            if (stallCount >= 4) {
-                                clearInterval(video._hlsStallTimer);
-                                video._hlsStallTimer = null;
-                                video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
-                                if (video._hlsReParseCount <= 3) {
-                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
-                                } else {
-                                    showOfflineOverlay(currentAnchorName);
-                                }
-                            }
-                        } else { stallCount = 0; }
+                            if(stallCount >= 4){ clearInterval(video._hlsStallTimer); video._hlsStallTimer=null; video._hlsReParseCount=(video._hlsReParseCount||0)+1; if(video._hlsReParseCount<=3){ if(lastRoomUrl) setTimeout(()=>goWithUrl(lastRoomUrl),500); } else showOfflineOverlay(currentAnchorName); }
+                        } else stallCount=0;
                         lastTime = ct;
                     }, 2500);
                 }
@@ -1141,62 +622,28 @@
 
         art.on('ready', () => {
             updateFollowBtn(lastRoomUrl);
-            if (currentDanmakuRoom === lastRoomUrl) return;
+            if(currentDanmakuRoom === lastRoomUrl) return;
             currentDanmakuRoom = lastRoomUrl;
-
-            if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-            if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
-            if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
-
-            if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
-                startDouyuDanmaku(lastRoomUrl.split('/').pop().split('?')[0]);
-            } else if (dmConfig && dmConfig.platform === 'huya') {
-                startHuyaDanmaku(dmConfig);
-            } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                startDouyinDanmaku(window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0]);
-            } else if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
-                startTwitchDanmaku(window._twitchChannelName || lastRoomUrl.split('/').pop().split('?')[0]);
-            }
+            if(dmWs){ try{dmWs.close();}catch(e){} dmWs=null; }
+            if(douyinWs){ try{douyinWs.close();}catch(e){} douyinWs=null; }
+            if(twitchWs){ try{twitchWs.close();}catch(e){} twitchWs=null; }
+            if(lastRoomUrl?.includes('douyu.com')) startDouyuDanmaku(lastRoomUrl.split('/').pop().split('?')[0]);
+            else if(dmConfig?.platform==='huya') startHuyaDanmaku(dmConfig);
+            else if(lastRoomUrl?.includes('douyin.com')) startDouyinDanmaku(window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0]);
+            else if(lastRoomUrl?.includes('twitch.tv')) startTwitchDanmaku(window._twitchChannelName || lastRoomUrl.split('/').pop().split('?')[0]);
         });
-
-        art.on('video:volumechange', () => {
-            if (art) {
-                savedVolume = art.volume;
-                savedMuted = art.muted;
-                saveVolumeMemory();
-            }
-        });
-        art.on('quality', (q) => {
-            if (q && art.video && art.video._hlsStallTimer) {
-                clearInterval(art.video._hlsStallTimer);
-                art.video._hlsStallTimer = null;
-            }
-        });
+        art.on('video:volumechange', ()=>{ if(art){ savedVolume=art.volume; savedMuted=art.muted; saveVolumeMemory(); } });
+        art.on('quality', (q)=>{ if(q && art.video?._hlsStallTimer){ clearInterval(art.video._hlsStallTimer); art.video._hlsStallTimer=null; } });
     }
 
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden && art) {
-            const video = art.video;
-            if (!video || video.paused) return;
-            if (window._hlsInst) {
-                try {
-                    const livePos = window._hlsInst.liveSyncPosition;
-                    if (livePos && Math.abs(video.currentTime - livePos) > 3) {
-                        video.currentTime = livePos;
-                        video.play().catch(() => {});
-                    }
-                } catch(e) {}
-            }
+        if(!document.hidden && art){
+            const video = art.video; if(!video || video.paused) return;
+            if(window._hlsInst){ try{ const lp = window._hlsInst.liveSyncPosition; if(lp && Math.abs(video.currentTime-lp)>3){ video.currentTime=lp; video.play().catch(()=>{}); } } catch(e){} }
         }
     });
 
-    function setBtn(loading) {
-        const btn = document.getElementById('btn-play');
-        if (btn) {
-            btn.disabled = loading;
-            btn.textContent = loading ? '…' : '播放';
-        }
-    }
+    function setBtn(loading){ const btn = document.getElementById('btn-play'); if(btn){ btn.disabled=loading; btn.textContent=loading?'…':'播放'; } }
 
     // ==================== 标签页与弹幕开关 ====================
     function initTabs() {
@@ -1204,181 +651,70 @@
         const headerTitle = document.getElementById('header-title');
         const headerAction = document.getElementById('header-action');
         const dmSwitch = document.getElementById('danmaku-switch');
-        btns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab;
-                if (tab === currentTab) return;
-                currentTab = tab;
-                btns.forEach(b => b.classList.remove('active'));
-                btn.classList.add('active');
-                const sp = document.getElementById('settings-panel');
-                if (tab === 'danmaku') {
-                    headerTitle.innerText = '弹幕列表';
-                    dmSwitch.style.display = 'flex';
-                    headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
-                    followListDiv.style.display = 'none';
-                    historyListDiv.style.display = 'none';
-                    sp.style.display = 'none';
-                } else if (tab === 'follow') {
-                    headerTitle.innerText = '关注列表';
-                    dmSwitch.style.display = 'none';
-                    headerAction.style.display = 'block';
-                    headerAction.innerText = '刷新';
-                    headerAction.onclick = () => refreshAllFollowStatus();
-                    chatMessagesDiv.style.display = 'none';
-                    followListDiv.style.display = 'flex';
-                    historyListDiv.style.display = 'none';
-                    sp.style.display = 'none';
-                    renderFollowList();
-                } else if (tab === 'history') {
-                    headerTitle.innerText = '播放历史';
-                    dmSwitch.style.display = 'none';
-                    headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = 'none';
-                    followListDiv.style.display = 'none';
-                    historyListDiv.style.display = 'flex';
-                    sp.style.display = 'none';
-                    renderHistoryList();
-                } else if (tab === 'settings') {
-                    headerTitle.innerText = '设置';
-                    dmSwitch.style.display = 'none';
-                    headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = 'none';
-                    followListDiv.style.display = 'none';
-                    historyListDiv.style.display = 'none';
-                    sp.style.display = 'flex';
-                    document.getElementById('soop-cookie-input').value = getSoopCookie();
-                    document.getElementById('twitch-cookie-input').value = getTwitchCookie();
-                    const sc = getSoopCookie();
-                    const tc = getTwitchCookie();
-                    document.getElementById('soop-cookie-status').textContent = sc ? `✅ 已保存 (${sc.length} 字符)` : '';
-                    document.getElementById('twitch-cookie-status').textContent = tc ? `✅ 已保存 (${tc.length} 字符)` : '';
-                }
-            });
-        });
+        btns.forEach(btn => btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab; if(tab===currentTab) return;
+            currentTab = tab; btns.forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+            const sp = document.getElementById('settings-panel');
+            if(tab==='danmaku'){ headerTitle.innerText='弹幕列表'; dmSwitch.style.display='flex'; headerAction.style.display='none'; chatMessagesDiv.style.display=danmakuEnabled?'flex':'none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='none'; }
+            else if(tab==='follow'){ headerTitle.innerText='关注列表'; dmSwitch.style.display='none'; headerAction.style.display='block'; headerAction.innerText='刷新'; headerAction.onclick=refreshAllFollowStatus; chatMessagesDiv.style.display='none'; followListDiv.style.display='flex'; historyListDiv.style.display='none'; sp.style.display='none'; renderFollowList(); }
+            else if(tab==='history'){ headerTitle.innerText='播放历史'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='flex'; sp.style.display='none'; renderHistoryList(); }
+            else if(tab==='settings'){ headerTitle.innerText='设置'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='flex'; document.getElementById('soop-cookie-input').value=getSoopCookie(); document.getElementById('twitch-cookie-input').value=getTwitchCookie(); document.getElementById('soop-cookie-status').textContent=getSoopCookie()?`✅ 已保存 (${getSoopCookie().length} 字符)`:''; document.getElementById('twitch-cookie-status').textContent=getTwitchCookie()?`✅ 已保存 (${getTwitchCookie().length} 字符)`:''; }
+        }));
     }
 
     function initDanmakuSwitch() {
         const icon = document.getElementById('dm-switch-icon');
-        if (icon) {
-            icon.addEventListener('click', () => {
-                danmakuEnabled = !danmakuEnabled;
-                icon.textContent = danmakuEnabled ? '🔊' : '🔇';
-                icon.title = danmakuEnabled ? '关闭弹幕' : '开启弹幕';
-                if (!danmakuEnabled) {
-                    currentDanmakuRoom = '';
-                    if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-                    if (douyinWs) { try { douyinWs.close(); } catch(e){} douyinWs = null; }
-                    if (twitchWs) { try { twitchWs.close(); } catch(e){} twitchWs = null; }
-                } else {
-                    currentDanmakuRoom = lastRoomUrl;
-                    if (lastRoomUrl && lastRoomUrl.includes('douyu.com')) {
-                        startDouyuDanmaku(lastRoomUrl.split('/').pop().split('?')[0]);
-                    } else if (dmConfig && dmConfig.platform === 'huya') {
-                        startHuyaDanmaku(dmConfig);
-                    } else if (lastRoomUrl && lastRoomUrl.includes('douyin.com')) {
-                        startDouyinDanmaku(window._douyinRoomId || lastRoomUrl.split('/').pop().split('?')[0]);
-                    } else if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
-                        startTwitchDanmaku(window._twitchChannelName || lastRoomUrl.split('/').pop().split('?')[0]);
-                    }
-                }
-                if (currentTab === 'danmaku') {
-                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
-                }
-            });
-        }
+        if(icon) icon.addEventListener('click', () => {
+            danmakuEnabled = !danmakuEnabled;
+            icon.textContent = danmakuEnabled?'🔊':'🔇'; icon.title = danmakuEnabled?'关闭弹幕':'开启弹幕';
+            if(!danmakuEnabled){ currentDanmakuRoom=''; if(dmWs){ try{dmWs.close();}catch(e){} dmWs=null; } if(douyinWs){ try{douyinWs.close();}catch(e){} douyinWs=null; } if(twitchWs){ try{twitchWs.close();}catch(e){} twitchWs=null; } }
+            else { currentDanmakuRoom = lastRoomUrl; if(lastRoomUrl?.includes('douyu.com')) startDouyuDanmaku(lastRoomUrl.split('/').pop().split('?')[0]); else if(dmConfig?.platform==='huya') startHuyaDanmaku(dmConfig); else if(lastRoomUrl?.includes('douyin.com')) startDouyinDanmaku(window._douyinRoomId||lastRoomUrl.split('/').pop().split('?')[0]); else if(lastRoomUrl?.includes('twitch.tv')) startTwitchDanmaku(window._twitchChannelName||lastRoomUrl.split('/').pop().split('?')[0]); }
+            if(currentTab==='danmaku') chatMessagesDiv.style.display = danmakuEnabled?'flex':'none';
+        });
     }
 
-    window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
+    window.go = () => { const url = document.getElementById('url').value.trim(); if(url) goWithUrl(url); };
     window.toggleFollow = () => {
-        const url = document.getElementById('url').value.trim() || lastRoomUrl;
-        if (!url) return;
-        const follows = _loadFollows();
-        const idx = follows.findIndex(x => x.url === url);
-        if (idx >= 0) {
-            follows.splice(idx, 1);
-        } else {
-            let name = currentAnchorName;
-            let platform = currentPlatform;
-            let avatar = currentAvatar;
-            const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'];
-            if (!name || defaultNames.includes(name)) {
-                const defaultName = url.split('/').pop().split('?')[0] || '主播';
-                const customName = prompt('请输入该主播的备注名', defaultName);
-                if (customName === null) return;
-                name = customName.trim() || defaultName;
-                platform = getPlatformName(url);
-                avatar = '';
+        const url = document.getElementById('url').value.trim() || lastRoomUrl; if(!url) return;
+        const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
+        if(idx>=0) follows.splice(idx,1);
+        else {
+            let name=currentAnchorName, platform=currentPlatform, avatar=currentAvatar;
+            if(!name||['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'].includes(name)){
+                const defName = url.split('/').pop().split('?')[0]||'主播';
+                const custom = prompt('请输入该主播的备注名', defName); if(custom===null) return;
+                name = custom.trim()||defName; platform=getPlatformName(url); avatar='';
             }
-            follows.unshift({ url, name, platform, status: 'unknown', t: Date.now(), avatar: avatar || '' });
+            follows.unshift({url, name, platform, status:'unknown', t:Date.now(), avatar:avatar||''});
         }
-        _saveFollows(follows);
-        updateFollowBtn(url);
-        renderFollowList();
+        _saveFollows(follows); updateFollowBtn(url); renderFollowList();
     };
-    window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
+    window.openOriginalUrl = () => { if(lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
 
-    // ==================== 初始化 ====================
-    function init() {
+    function init(){
         chatMessagesDiv = document.getElementById('chat-messages');
         followListDiv = document.getElementById('follow-list');
         historyListDiv = document.getElementById('history-list');
-        loadVolumeMemory();
-        initTabs();
-        initDanmakuSwitch();
+        loadVolumeMemory(); initTabs(); initDanmakuSwitch();
 
-        followListDiv.addEventListener('auxclick', (e) => {
-            if (e.button !== 1) return;
-            const item = e.target.closest('.follow-item');
-            if (!item || !item.dataset.url) return;
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
-        }, true);
-
-        followListDiv.addEventListener('click', (e) => {
-            if (e.button !== 0) return;
+        followListDiv.addEventListener('auxclick', e => { if(e.button!==1)return; const it=e.target.closest('.follow-item'); if(it?.dataset.url){ e.preventDefault(); e.stopPropagation(); window.open(location.origin+location.pathname+'?url='+encodeURIComponent(it.dataset.url),'_blank'); } }, true);
+        followListDiv.addEventListener('click', e => {
+            if(e.button!==0) return;
             const del = e.target.closest('[data-del]');
-            if (del) {
-                const idx = parseInt(del.dataset.del);
-                const arr = _loadFollows();
-                arr.splice(idx, 1);
-                _saveFollows(arr);
-                renderFollowList();
-                updateFollowBtn(lastRoomUrl);
-                return;
-            }
-            const item = e.target.closest('.follow-item');
-            if (item && item.dataset.url) playFromFollows(item.dataset.url);
+            if(del){ const arr=_loadFollows(); arr.splice(parseInt(del.dataset.del),1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
+            const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
-        followListDiv.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
+        followListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
 
-        historyListDiv.addEventListener('auxclick', (e) => {
-            if (e.button !== 1) return;
-            const item = e.target.closest('.history-item');
-            if (!item || !item.dataset.url) return;
-            e.preventDefault();
-            e.stopPropagation();
-            window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
-        }, true);
+        historyListDiv.addEventListener('auxclick', e => { if(e.button!==1)return; const it=e.target.closest('.history-item'); if(it?.dataset.url){ e.preventDefault(); e.stopPropagation(); window.open(location.origin+location.pathname+'?url='+encodeURIComponent(it.dataset.url),'_blank'); } }, true);
+        historyListDiv.addEventListener('click', e => { if(e.button!==0)return; const it=e.target.closest('.history-item'); if(it?.dataset.url) playFromHistory(it.dataset.url); });
+        historyListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
 
-        historyListDiv.addEventListener('click', (e) => {
-            if (e.button !== 0) return;
-            const item = e.target.closest('.history-item');
-            if (item && item.dataset.url) playFromHistory(item.dataset.url);
-        });
-        historyListDiv.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
-
-        renderFollowList();
-        renderHistoryList();
-        document.getElementById('url').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.go(); });
-        const autoUrl = new URLSearchParams(window.location.search).get('url');
-        if (autoUrl) {
-            document.getElementById('url').value = autoUrl;
-            window.go();
-        }
-        setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
+        renderFollowList(); renderHistoryList();
+        document.getElementById('url').addEventListener('keypress', e => { if(e.key==='Enter') window.go(); });
+        const autoUrl = new URLSearchParams(location.search).get('url');
+        if(autoUrl){ document.getElementById('url').value = autoUrl; window.go(); }
+        setInterval(refreshAllFollowStatus, 5*60*1000);
         refreshAllFollowStatus();
     }
     init();
