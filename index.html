@@ -148,7 +148,7 @@
     // 默认头像 Base64
     const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
 
-    // 需要走 Worker 代理的域名
+    // 需要走 Worker 代理的域名 (海外平台 + 抖音)
     function isForeignAvatar(url) {
         if (!url) return false;
         const foreignKeywords = [
@@ -754,7 +754,7 @@
         }
     }
 
-    // ==================== 播放器核心 (已修复 SourceBuffer 冲突) ====================
+    // ==================== 播放器核心 (已优化 MSE 安全解绑) ====================
     function ensureHttps(url) {
         if (!url) return url;
         if (url.startsWith('https://')) return url;
@@ -776,7 +776,10 @@
 
     async function goWithUrl(raw) {
         if (!raw) return;
-        if (window._reParseLock) return;
+        if (window._reParseLock) {
+            console.log("[防抖] 正在重连冷却中，跳过本次请求");
+            return;
+        }
         window._reParseLock = true;
         setTimeout(() => { window._reParseLock = false; }, 2000);
 
@@ -854,17 +857,17 @@
     }
 
     function playStream(streams) {
-        // 深度重置 video 元素
+        // 安全且彻底的 MSE 与 DOM 重置
         if (art) {
             try {
                 if (art.video) {
                     art.video.pause();
+                    // 安全解除 MSE 绑定，避免 DOMException
+                    if (art.video.srcObject) art.video.srcObject = null;
                     art.video.removeAttribute('src');
-                    art.video.removeAttribute('srcObject');
-                    art.video.load();
                 }
                 art.destroy(true);
-            } catch(e){}
+            } catch(e){ console.warn("Artplayer销毁异常:", e); }
             art = null;
         }
         if (window._hlsInst) {
@@ -874,6 +877,17 @@
                 window._hlsInst.destroy();
             } catch(e){}
             window._hlsInst = null;
+        }
+        // 清理可能残留的 mpegts 实例
+        const oldVideo = document.querySelector('#player video');
+        if (oldVideo && oldVideo._mpegts) {
+            try {
+                oldVideo._mpegts.pause();
+                oldVideo._mpegts.unload();
+                oldVideo._mpegts.detachMediaElement(); // 内部会安全清理 SourceBuffer
+                oldVideo._mpegts.destroy();
+            } catch(e){}
+            oldVideo._mpegts = null;
         }
         document.getElementById('player').innerHTML = '';
 
@@ -887,7 +901,12 @@
 
         const sDefault = streams[defaultIndex] || streams[0];
         const artType = sDefault.type === 'flv' ? 'flv' : (sDefault.type === 'm3u8' ? 'm3u8' : '');
-        const qualityList = streams.map((s, i) => ({ default: i === defaultIndex, html: s.cdn, url: getProxyUrl(s.url), type: s.type || '' }));
+        const qualityList = streams.map((s, i) => ({
+            default: i === defaultIndex,
+            html: s.cdn,
+            url: getProxyUrl(s.url),
+            type: s.type || ''
+        }));
 
         art = new Artplayer({
             container: '#player',
@@ -908,20 +927,17 @@
             customType: {
                 flv: function(video, url) {
                     if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
+                    
+                    // 防御性清理
                     if (video._mpegts) {
-                        const oldPlayer = video._mpegts;
-                        video._mpegts = null;
                         try {
-                            if (video._cleanupSourceBuffer) video._cleanupSourceBuffer();
-                            oldPlayer.pause();
-                            oldPlayer.unload();
-                            oldPlayer.detachMediaElement();
-                            oldPlayer.destroy();
+                            video._mpegts.pause();
+                            video._mpegts.unload();
+                            video._mpegts.detachMediaElement();
+                            video._mpegts.destroy();
                         } catch(e){}
+                        video._mpegts = null;
                     }
-                    video._playerIdCounter = (video._playerIdCounter || 0) + 1;
-                    const playerId = video._playerIdCounter;
-                    video._playerId = playerId;
 
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
                         enableWorker: true,
@@ -936,23 +952,10 @@
                         reconnectAttempts: 0,
                         fixAudioTimestampGap: false
                     });
+                    
                     player.attachMediaElement(video);
                     player.load();
                     video._mpegts = player;
-
-                    // 手动清理 SourceBuffer
-                    video._cleanupSourceBuffer = () => {
-                        if (player && player.mediaSource && player.mediaSource.readyState === 'open') {
-                            const sourceBuffers = player.mediaSource.sourceBuffers;
-                            while (sourceBuffers.length > 0) {
-                                const sb = sourceBuffers[0];
-                                if (sb && !sb.updating) {
-                                    try { sb.abort(); } catch(e){}
-                                    try { player.mediaSource.removeSourceBuffer(sb); } catch(e){}
-                                }
-                            }
-                        }
-                    };
 
                     video._reParseCount = 0;
                     let lastTime = -1, stallCount = 0;
