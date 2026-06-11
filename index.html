@@ -139,6 +139,29 @@
 <script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
+    // ==================== 头像代理配置 ====================
+    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 确认这是你的 Worker 域名
+    
+    function avatarSrc(url) {
+        if (!url || !url.startsWith('http')) return url || '';
+        // 只有抖音系等严格防盗链平台才走 Worker 代理
+        const strictDomains = ['douyinpic.com', 'snssdk.com', 'toutiao.com', 'amemv.com'];
+        if (strictDomains.some(d => url.includes(d))) {
+            return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
+        }
+        return url;
+    }
+    
+    function handleImgError(img) {
+        // 避免死循环：如果已经包含 /avatar，说明代理也失败了
+        if (img.src && !img.src.includes('/avatar') && img.src.startsWith('http')) {
+            img.src = WORKER_BASE + '/avatar?url=' + encodeURIComponent(img.src);
+        } else {
+            // 代理也失败，显示默认灰色头像占位图
+            img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%23333" width="36" height="36"/%3E%3Ctext fill="%23888" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-size="20"%3E%F0%9F%91%A4%3C/text%3E%3C/svg%3E';
+        }
+    }
+
     window.addEventListener('error', (e) => {
         if (e.message && e.message.includes('SourceBuffer has been removed')) {
             e.preventDefault(); e.stopPropagation(); return false;
@@ -268,7 +291,7 @@
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         let html = '';
         items.forEach(item => {
-            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${escapeHtml(item.avatar)}" alt="" referrerpolicy="no-referrer">` : '<div class="history-avatar"></div>';
+            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${avatarSrc(item.avatar)}" alt="" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '<div class="history-avatar"></div>';
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
@@ -305,7 +328,7 @@
         let html = '';
         items.forEach((x, i) => {
             const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${escapeHtml(x.avatar)}" alt="" referrerpolicy="no-referrer">` : '<div class="follow-avatar"></div>';
+            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${avatarSrc(x.avatar)}" alt="" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '<div class="follow-avatar"></div>';
             html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
         });
         followListDiv.innerHTML = html;
@@ -332,7 +355,7 @@
         const toast = document.createElement('div');
         toast.className = 'page-toast';
         toast.innerHTML = `
-            <div class="toast-icon">${avatar ? `<img src="${escapeHtml(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer">` : '🔔'}</div>
+            <div class="toast-icon">${avatar ? `<img src="${avatarSrc(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '🔔'}</div>
             <div class="toast-body">
                 <div class="toast-title">${escapeHtml(platform || '')} ${escapeHtml(name || '主播')} 开播了！</div>
                 <div class="toast-sub">点击立即观看 →</div>
