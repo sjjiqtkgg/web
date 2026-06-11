@@ -140,7 +140,32 @@
 <script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
-    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev";
+    // ==================== 配置 ====================
+    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 你的 Worker 域名
+    const API_BASE = 'https://live1-cxe9.onrender.com'; // 你的后端域名
+    const CF_WORKER = WORKER_BASE;
+
+    // 默认头像 Base64
+    const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
+
+    // 海外平台头像特征 (需要走 Worker 代理)
+    function isForeignAvatar(url) {
+        if (!url) return false;
+        const foreignKeywords = ['jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch'];
+        return foreignKeywords.some(kw => url.toLowerCase().includes(kw));
+    }
+
+    // 生成最终头像 URL (国内直连+no-referrer，海外走Worker)
+    function getFinalAvatarUrl(originalUrl) {
+        if (!originalUrl || typeof originalUrl !== 'string' || !originalUrl.startsWith('http')) {
+            return defaultAvatar;
+        }
+        if (isForeignAvatar(originalUrl)) {
+            return WORKER_BASE + '/avatar?url=' + encodeURIComponent(originalUrl);
+        } else {
+            return originalUrl;
+        }
+    }
 
     function avatarSrc(url) {
         if (typeof url !== 'string') {
@@ -151,19 +176,12 @@
             }
         }
         if (!url || !url.startsWith('http')) return '';
-        const strictDomains = ['douyinpic.com', 'snssdk.com', 'toutiao.com', 'amemv.com'];
-        if (strictDomains.some(d => url.includes(d))) {
-            return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
-        }
-        return url;
+        return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
     }
 
     function handleImgError(img) {
-        if (img.src && !img.src.includes('/avatar') && img.src.startsWith('http')) {
-            img.src = WORKER_BASE + '/avatar?url=' + encodeURIComponent(img.src);
-        } else {
-            img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%23333" width="36" height="36"/%3E%3Ctext fill="%23888" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-size="20"%3E%F0%9F%91%A4%3C/text%3E%3C/svg%3E';
-        }
+        img.onerror = null;
+        img.src = defaultAvatar;
     }
 
     function updateFavicon(avatarUrl) {
@@ -182,8 +200,7 @@
         }
     }, true);
 
-    const API_BASE = 'https://live1-cxe9.onrender.com';
-
+    // ==================== 全局变量 ====================
     let art = null;
     let lastRoomUrl = '';
     let savedVolume = 0.5;
@@ -212,6 +229,7 @@
     let sortable = null;
     const HISTORY_MAX = 100;
 
+    // ==================== 本地存储 ====================
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
     function _saveFollows(arr) { try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {} }
     function _loadHistory() { try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; } }
@@ -299,14 +317,19 @@
         renderHistoryList();
     }
 
+    // ==================== 渲染列表 (区分头像策略) ====================
     function renderHistoryList() {
         if (!historyListDiv) return;
         const items = _loadHistory();
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         let html = '';
         items.forEach(item => {
-            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${avatarSrc(item.avatar)}" alt="" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '<div class="history-avatar"></div>';
-            html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
+            const finalUrl = getFinalAvatarUrl(item.avatar);
+            html += `<div class="history-item" data-url="${escapeHtml(item.url)}">
+                <img class="history-avatar" src="${finalUrl}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+                <span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span>
+                <span class="history-time">${formatTime(item.time)}</span>
+            </div>`;
         });
         historyListDiv.innerHTML = html;
     }
@@ -342,8 +365,13 @@
         let html = '';
         items.forEach((x, i) => {
             const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${avatarSrc(x.avatar)}" alt="" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '<div class="follow-avatar"></div>';
-            html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
+            const finalUrl = getFinalAvatarUrl(x.avatar);
+            html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">
+                <img class="follow-avatar" src="${finalUrl}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+                <span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span>
+                <span class="follow-status ${x.status}">${statusText}</span>
+                <span class="follow-delete" data-del="${i}">✕</span>
+            </div>`;
         });
         followListDiv.innerHTML = html;
         followListDiv.scrollTop = savedScrollTop;
@@ -368,8 +396,9 @@
         }
         const toast = document.createElement('div');
         toast.className = 'page-toast';
+        const finalUrl = getFinalAvatarUrl(avatar);
         toast.innerHTML = `
-            <div class="toast-icon">${avatar ? `<img src="${avatarSrc(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="handleImgError(this)">` : '🔔'}</div>
+            <div class="toast-icon"><img src="${finalUrl}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';"></div>
             <div class="toast-body">
                 <div class="toast-title">${escapeHtml(platform || '')} ${escapeHtml(name || '主播')} 开播了！</div>
                 <div class="toast-sub">点击立即观看 →</div>
@@ -388,6 +417,7 @@
         }, 6000);
     }
 
+    // ==================== 批量刷新关注状态 ====================
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
@@ -428,6 +458,7 @@
         });
     }
 
+    // ==================== 弹幕连接模块 ====================
     function startDouyuDanmaku(roomId) {
         if (!danmakuEnabled || !roomId) return;
         if (douyuConnecting) return;
@@ -489,6 +520,7 @@
         ws.onerror = () => { douyuConnecting = false; if (ws._hbTimer) { clearInterval(ws._hbTimer); ws._hbTimer = null; } };
     }
 
+    // 虎牙 Tars 协议解析与连接
     function tarsReader(ab) {
         const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab);
         let pos = 0;
@@ -722,14 +754,13 @@
         }
     }
 
+    // ==================== 播放器核心 ====================
     function ensureHttps(url) {
         if (!url) return url;
         if (url.startsWith('https://')) return url;
         if (url.startsWith('http://')) return url.replace('http://', 'https://');
         return url;
     }
-
-    const CF_WORKER = "https://aged-water-fc43.byronfuller5566.workers.dev";
 
     function getProxyUrl(originalUrl) {
         if (originalUrl.startsWith(CF_WORKER)) return originalUrl;
@@ -774,7 +805,6 @@
                     if (raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
                 } else {
-                    // 【优化】解析失败兜底提示
                     alert(`解析失败：${data?.error || '主播可能未开播或链接无效，请检查后重试'}`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName); setBtn(false); return;
@@ -809,18 +839,11 @@
                 art.video.load();
             } catch(e) {}
         }
-        
         if (art) { try { art.destroy(true); } catch(e){} art = null; }
-        
         if (window._hlsInst) { 
-            try { 
-                window._hlsInst.stopLoad();
-                window._hlsInst.detachMedia();
-                window._hlsInst.destroy();
-            } catch(e){} 
+            try { window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} 
             window._hlsInst = null; 
         }
-        
         document.getElementById('player').innerHTML = '';
 
         let defaultIndex = 0;
@@ -881,23 +904,13 @@
                 },
                 m3u8: function(video, url) {
                     if (window._hlsInst) { 
-                        try { 
-                            window._hlsInst.stopLoad();
-                            window._hlsInst.detachMedia();
-                            window._hlsInst.destroy();
-                        } catch(e){} 
+                        try { window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} 
                         window._hlsInst = null; 
                     }
                     if (video._mpegts) { 
-                        try { 
-                            video._mpegts.pause();
-                            video._mpegts.unload(); 
-                            video._mpegts.detachMediaElement(); 
-                            video._mpegts.destroy(); 
-                        } catch(e){} 
+                        try { video._mpegts.pause(); video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} 
                         video._mpegts = null; 
                     }
-                    
                     video.removeAttribute('src');
                     video.load();
                     
@@ -1031,6 +1044,7 @@
         if (btn) { btn.disabled = loading; btn.textContent = loading ? '…' : '播放'; }
     }
 
+    // ==================== 标签页与弹幕开关 ====================
     function initTabs() {
         const btns = document.querySelectorAll('.bar-tab');
         const headerTitle = document.getElementById('header-title');
@@ -1115,6 +1129,7 @@
     };
     window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
 
+    // ==================== 初始化 ====================
     function init() {
         chatMessagesDiv = document.getElementById('chat-messages');
         followListDiv = document.getElementById('follow-list');
