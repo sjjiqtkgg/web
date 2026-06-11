@@ -30,17 +30,17 @@
         .offline-sub { color: #aaa; font-size: 13px; }
         .offline-retry { margin-top: 8px; padding: 8px 24px; background: #f5a623; color: #000; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
         .offline-retry:hover { background: #e09510; }
-
+        
         #chat-panel { width: 320px; background: #0f0f0f; border-left: 1px solid #222; display: flex; flex-direction: column; flex-shrink: 0; min-height: 0; }
         .chat-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; background: #121212; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
         .chat-header span { color: #f5a623; font-weight: 500; }
         .danmaku-switch { display: flex; align-items: center; gap: 8px; }
         .switch-icon { font-size: 18px; cursor: pointer; padding: 4px; border-radius: 4px; }
         .switch-icon:hover { background: #2a2a2a; }
-
+        
         .chat-content { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; padding: 0; position: relative; }
         .chat-messages, .follow-list, .history-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
-
+        
         .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
         .chat-nick { color: #8bc34a; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
@@ -139,26 +139,39 @@
 <script src="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.js"></script>
 
 <script>
-    // ==================== 头像代理配置 ====================
-    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 确认这是你的 Worker 域名
-    
+    // ==================== 头像代理配置（增强版） ====================
+    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 你的 Worker 域名
+
     function avatarSrc(url) {
-        // 严格类型检查，防止非字符串导致 .startsWith 报错
-        if (!url || typeof url !== 'string' || !url.startsWith('http')) return '';
-        // 只有抖音系等严格防盗链平台才走 Worker 代理
+        // 【防御1】：处理非字符串类型（防止 startsWith 报错导致循环中断）
+        if (typeof url !== 'string') {
+            if (url && typeof url === 'object') {
+                // 【兼容】：尝试从对象中提取 URL（虎牙等平台可能返回 {big: "...", middle: "..."}）
+                url = url.big || url.middle || url.small || url.url || url.src || '';
+            } else {
+                url = ''; // 数字、null、undefined 等直接置空
+            }
+        }
+        
+        // 【防御2】：空值或非 http 链接直接返回空
+        if (!url || !url.startsWith('http')) return '';
+        
+        // 【核心】：只有抖音系等严格防盗链平台才走 Worker 代理
         const strictDomains = ['douyinpic.com', 'snssdk.com', 'toutiao.com', 'amemv.com'];
         if (strictDomains.some(d => url.includes(d))) {
             return WORKER_BASE + '/avatar?url=' + encodeURIComponent(url);
         }
+        
+        // 其他平台（虎牙、斗鱼、B站等）直接返回原链接
         return url;
     }
-    
+
     function handleImgError(img) {
         // 避免死循环：如果已经包含 /avatar，说明代理也失败了
         if (img.src && !img.src.includes('/avatar') && img.src.startsWith('http')) {
             img.src = WORKER_BASE + '/avatar?url=' + encodeURIComponent(img.src);
         } else {
-            // 代理也失败，显示默认灰色头像占位图
+            // 代理也失败或原本就没链接，显示默认灰色头像占位图
             img.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="36" height="36"%3E%3Crect fill="%23333" width="36" height="36"/%3E%3Ctext fill="%23888" x="50%25" y="50%25" text-anchor="middle" dy=".3em" font-size="20"%3E%F0%9F%91%A4%3C/text%3E%3C/svg%3E';
         }
     }
