@@ -148,14 +148,17 @@
     // 默认头像 Base64
     const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
 
-    // 海外平台头像特征
+    // 需要走 Worker 代理的域名 (包含海外平台及抖音等严格防盗链的国内平台)
     function isForeignAvatar(url) {
         if (!url) return false;
-        const foreignKeywords = ['jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch'];
+        const foreignKeywords = [
+            'jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch', 
+            'douyinpic.com', 'amemv.com', 'byteimg.com', 'snssdk.com'
+        ];
         return foreignKeywords.some(kw => url.toLowerCase().includes(kw));
     }
 
-    // 生成最终头像 URL (国内直连+no-referrer，海外走Worker)
+    // 生成最终头像 URL (国内普通直连+no-referrer，海外及抖音走 Worker)
     function getFinalAvatarUrl(originalUrl) {
         if (!originalUrl || typeof originalUrl !== 'string' || !originalUrl.startsWith('http')) {
             return defaultAvatar;
