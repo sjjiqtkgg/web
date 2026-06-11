@@ -148,17 +148,16 @@
     // 默认头像 Base64
     const defaultAvatar = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iI2NjYyI+PHBhdGggZD0iTTEyIDJhNSA1IDAgMTAwIDEwIDUgNSAwIDAwMC0xMHptLTcgMThhNyA3IDAgMDEtMTQtMXYtMmE3IDcgMCAwMTE0IDB2MmE3IDcgMCAwMS0xNCAweiIvPjwvc3ZnPg==';
 
-    // 需要走 Worker 代理的域名 (包含海外平台及抖音等严格防盗链的国内平台)
+    // 需要走 Worker 代理的域名
     function isForeignAvatar(url) {
         if (!url) return false;
         const foreignKeywords = [
-            'jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch', 
+            'jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch',
             'douyinpic.com', 'amemv.com', 'byteimg.com', 'snssdk.com'
         ];
         return foreignKeywords.some(kw => url.toLowerCase().includes(kw));
     }
 
-    // 生成最终头像 URL (国内普通直连+no-referrer，海外及抖音走 Worker)
     function getFinalAvatarUrl(originalUrl) {
         if (!originalUrl || typeof originalUrl !== 'string' || !originalUrl.startsWith('http')) {
             return defaultAvatar;
@@ -231,6 +230,9 @@
     let historyListDiv = null;
     let sortable = null;
     const HISTORY_MAX = 100;
+
+    // 防抖锁
+    window._reParseLock = false;
 
     // ==================== 本地存储 ====================
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
@@ -320,7 +322,7 @@
         renderHistoryList();
     }
 
-    // ==================== 渲染列表 (含 referrerpolicy="no-referrer") ====================
+    // ==================== 渲染列表 ====================
     function renderHistoryList() {
         if (!historyListDiv) return;
         const items = _loadHistory();
@@ -424,10 +426,8 @@
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
-
         const beforeStatus = {};
         items.forEach(item => { beforeStatus[item.url] = item.status; });
-
         const BATCH_SIZE = 3;
         for (let i = 0; i < items.length; i += BATCH_SIZE) {
             const batch = items.slice(i, i + BATCH_SIZE);
@@ -449,10 +449,8 @@
                 } catch(e) { item.status = 'error'; }
             }));
         }
-
         _saveFollows(items);
         renderFollowList();
-
         items.forEach(item => {
             const prev = beforeStatus[item.url];
             if (prev && prev !== 'online' && item.status === 'online') {
@@ -756,7 +754,7 @@
         }
     }
 
-    // ==================== 播放器核心 ====================
+    // ==================== 播放器核心 (已修复 SourceBuffer 冲突) ====================
     function ensureHttps(url) {
         if (!url) return url;
         if (url.startsWith('https://')) return url;
@@ -778,6 +776,10 @@
 
     async function goWithUrl(raw) {
         if (!raw) return;
+        if (window._reParseLock) return;
+        window._reParseLock = true;
+        setTimeout(() => { window._reParseLock = false; }, 2000);
+
         setBtn(true);
         if (chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
 
@@ -809,42 +811,69 @@
                 } else {
                     alert(`解析失败：${data?.error || '主播可能未开播或链接无效，请检查后重试'}`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
-                    showOfflineOverlay(currentAnchorName); setBtn(false); return;
+                    showOfflineOverlay(currentAnchorName);
+                    setBtn(false);
+                    window._reParseLock = false;
+                    return;
                 }
             } catch(e) {
                 if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
                     if (!window._networkRetryCount) window._networkRetryCount = 0;
                     if (window._networkRetryCount < 2) {
-                        window._networkRetryCount++; setBtn(true);
-                        setTimeout(() => goWithUrl(raw), window._networkRetryCount * 2000); return;
+                        window._networkRetryCount++;
+                        setBtn(true);
+                        setTimeout(() => goWithUrl(raw), window._networkRetryCount * 2000);
+                        return;
                     }
                 }
-                window._networkRetryCount = 0; setBtn(false); return;
+                window._networkRetryCount = 0;
+                setBtn(false);
+                window._reParseLock = false;
+                return;
             }
         } else if (isCDN) {
             const fileName = raw.split('/').pop().split('?')[0] || '直链';
             streams = [{ cdn: '直链', url: ensureHttps(raw), type: raw.includes('.m3u8') ? 'm3u8' : 'flv' }];
-            currentAnchorName = fileName; currentAvatar = ''; currentPlatform = '直链'; dmConfig = null;
+            currentAnchorName = fileName;
+            currentAvatar = '';
+            currentPlatform = '直链';
+            dmConfig = null;
             updateFavicon(null);
-        } else { setBtn(false); return; }
+        } else {
+            setBtn(false);
+            window._reParseLock = false;
+            return;
+        }
 
         updatePageTitle(currentAnchorName, currentPlatform);
         addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
-        window._networkRetryCount = 0; playStream(streams); setBtn(false);
+        window._networkRetryCount = 0;
+        playStream(streams);
+        setBtn(false);
+        window._reParseLock = false;
     }
 
     function playStream(streams) {
-        if (art && art.video) {
+        // 深度重置 video 元素
+        if (art) {
             try {
-                art.video.pause();
-                art.video.removeAttribute('src');
-                art.video.load();
-            } catch(e) {}
+                if (art.video) {
+                    art.video.pause();
+                    art.video.removeAttribute('src');
+                    art.video.removeAttribute('srcObject');
+                    art.video.load();
+                }
+                art.destroy(true);
+            } catch(e){}
+            art = null;
         }
-        if (art) { try { art.destroy(true); } catch(e){} art = null; }
-        if (window._hlsInst) { 
-            try { window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} 
-            window._hlsInst = null; 
+        if (window._hlsInst) {
+            try {
+                window._hlsInst.stopLoad();
+                window._hlsInst.detachMedia();
+                window._hlsInst.destroy();
+            } catch(e){}
+            window._hlsInst = null;
         }
         document.getElementById('player').innerHTML = '';
 
@@ -852,7 +881,8 @@
         if (lastRoomUrl && lastRoomUrl.includes('twitch.tv')) {
             let safeIndex = streams.findIndex(s => s.cdn && s.cdn.toLowerCase().includes('1080'));
             if (safeIndex === -1) safeIndex = streams.findIndex(s => s.cdn && (s.cdn.toLowerCase().includes('720') || s.cdn.toLowerCase().includes('high')));
-            if (safeIndex !== -1) defaultIndex = safeIndex; else if (streams.length > 1) defaultIndex = 1;
+            if (safeIndex !== -1) defaultIndex = safeIndex;
+            else if (streams.length > 1) defaultIndex = 1;
         }
 
         const sDefault = streams[defaultIndex] || streams[0];
@@ -860,33 +890,88 @@
         const qualityList = streams.map((s, i) => ({ default: i === defaultIndex, html: s.cdn, url: getProxyUrl(s.url), type: s.type || '' }));
 
         art = new Artplayer({
-            container: '#player', url: getProxyUrl(sDefault.url), type: artType, isLive: true, autoplay: true, muted: savedMuted, volume: savedVolume, setting: false, pip: true, screenshot: false, playbackRate: false, aspectRatio: false, fullscreenWeb: true, lang: 'zh-cn', quality: qualityList,
+            container: '#player',
+            url: getProxyUrl(sDefault.url),
+            type: artType,
+            isLive: true,
+            autoplay: true,
+            muted: savedMuted,
+            volume: savedVolume,
+            setting: false,
+            pip: true,
+            screenshot: false,
+            playbackRate: false,
+            aspectRatio: false,
+            fullscreenWeb: true,
+            lang: 'zh-cn',
+            quality: qualityList,
             customType: {
                 flv: function(video, url) {
                     if (video._stallTimer) { clearInterval(video._stallTimer); video._stallTimer = null; }
                     if (video._mpegts) {
-                        const oldPlayer = video._mpegts; video._mpegts = null;
-                        try { oldPlayer.pause(); oldPlayer.unload(); oldPlayer.detachMediaElement(); oldPlayer.destroy(); } catch(e){}
+                        const oldPlayer = video._mpegts;
+                        video._mpegts = null;
+                        try {
+                            if (video._cleanupSourceBuffer) video._cleanupSourceBuffer();
+                            oldPlayer.pause();
+                            oldPlayer.unload();
+                            oldPlayer.detachMediaElement();
+                            oldPlayer.destroy();
+                        } catch(e){}
                     }
                     video._playerIdCounter = (video._playerIdCounter || 0) + 1;
-                    const playerId = video._playerIdCounter; video._playerId = playerId;
+                    const playerId = video._playerIdCounter;
+                    video._playerId = playerId;
 
                     const player = mpegts.createPlayer({ type: 'flv', url: url, isLive: true }, {
-                        enableWorker: true, enableStashBuffer: false, stashInitialSize: 128, liveBufferLatencyChasing: true, liveBufferLatencyMaxLatency: 5.0, liveBufferLatencyMinRemain: 0.5, autoCleanupSourceBuffer: true, autoCleanupMaxBackwardDuration: 10, autoCleanupMinBackwardDuration: 5, lazyLoad: false, reconnectInterval: 0, reconnectAttempts: 0, fixAudioTimestampGap: false
+                        enableWorker: true,
+                        enableStashBuffer: false,
+                        stashInitialSize: 128,
+                        liveBufferLatencyChasing: true,
+                        liveBufferLatencyMaxLatency: 5.0,
+                        liveBufferLatencyMinRemain: 0.5,
+                        autoCleanupSourceBuffer: false,
+                        lazyLoad: false,
+                        reconnectInterval: 0,
+                        reconnectAttempts: 0,
+                        fixAudioTimestampGap: false
                     });
-                    player.attachMediaElement(video); player.load(); video._mpegts = player;
+                    player.attachMediaElement(video);
+                    player.load();
+                    video._mpegts = player;
 
-                    video._reParseCount = 0; let lastTime = -1, stallCount = 0;
+                    // 手动清理 SourceBuffer
+                    video._cleanupSourceBuffer = () => {
+                        if (player && player.mediaSource && player.mediaSource.readyState === 'open') {
+                            const sourceBuffers = player.mediaSource.sourceBuffers;
+                            while (sourceBuffers.length > 0) {
+                                const sb = sourceBuffers[0];
+                                if (sb && !sb.updating) {
+                                    try { sb.abort(); } catch(e){}
+                                    try { player.mediaSource.removeSourceBuffer(sb); } catch(e){}
+                                }
+                            }
+                        }
+                    };
+
+                    video._reParseCount = 0;
+                    let lastTime = -1, stallCount = 0;
                     video._stallTimer = setInterval(() => {
-                        if (video._playerId !== playerId || !art || !video) { clearInterval(video._stallTimer); video._stallTimer = null; return; }
+                        if (video._playerId !== playerId || !art || !video) {
+                            clearInterval(video._stallTimer);
+                            video._stallTimer = null;
+                            return;
+                        }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
                             if (stallCount >= 3) {
-                                clearInterval(video._stallTimer); video._stallTimer = null;
+                                clearInterval(video._stallTimer);
+                                video._stallTimer = null;
                                 if (lastRoomUrl) {
                                     video._reParseCount = (video._reParseCount || 0) + 1;
-                                    if (video._reParseCount <= 3) setTimeout(() => goWithUrl(lastRoomUrl), 500); else showOfflineOverlay(currentAnchorName);
+                                    if (video._reParseCount <= 3) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                    else showOfflineOverlay(currentAnchorName);
                                 }
                             }
                         } else { stallCount = 0; }
@@ -895,24 +980,36 @@
 
                     video.addEventListener('ended', function onFlvEnded() {
                         if (video._playerId !== playerId || !lastRoomUrl) return;
-                        clearInterval(video._stallTimer); video._stallTimer = null;
+                        clearInterval(video._stallTimer);
+                        video._stallTimer = null;
                         setTimeout(() => { if (lastRoomUrl) goWithUrl(lastRoomUrl); }, 1000);
                     });
                     player.on(mpegts.Events.ERROR, () => {
                         if (video._mpegts !== player) return;
-                        clearInterval(video._stallTimer); video._stallTimer = null;
+                        clearInterval(video._stallTimer);
+                        video._stallTimer = null;
                         if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1500);
                     });
                 },
                 m3u8: function(video, url) {
-                    if (window._hlsInst) { 
-                        try { window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} 
-                        window._hlsInst = null; 
+                    if (window._hlsInst) {
+                        try {
+                            window._hlsInst.stopLoad();
+                            window._hlsInst.detachMedia();
+                            window._hlsInst.destroy();
+                        } catch(e){}
+                        window._hlsInst = null;
                     }
-                    if (video._mpegts) { 
-                        try { video._mpegts.pause(); video._mpegts.unload(); video._mpegts.detachMediaElement(); video._mpegts.destroy(); } catch(e){} 
-                        video._mpegts = null; 
+                    if (video._mpegts) {
+                        try {
+                            video._mpegts.pause();
+                            video._mpegts.unload();
+                            video._mpegts.detachMediaElement();
+                            video._mpegts.destroy();
+                        } catch(e){}
+                        video._mpegts = null;
                     }
+                    
                     video.removeAttribute('src');
                     video.load();
                     
@@ -921,22 +1018,25 @@
                     video._waitingForAd = false;
 
                     video._hlsIdCounter = (video._hlsIdCounter || 0) + 1;
-                    const hlsId = video._hlsIdCounter; video._hlsId = hlsId; video._hlsReParseCount = 0;
+                    const hlsId = video._hlsIdCounter;
+                    video._hlsId = hlsId;
+                    video._hlsReParseCount = 0;
 
                     const startHls = (srcUrl) => {
                         if (video._hlsId !== hlsId) return;
                         if (window._hlsInst) { try { window._hlsInst.destroy(); } catch(e){} window._hlsInst = null; }
 
                         if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                            const hls = new Hls({ 
-                                liveSyncDurationCount: 3, 
-                                liveMaxLatencyDurationCount: 10, 
-                                lowLatencyMode: false, 
-                                maxBufferLength: 15, 
-                                maxMaxBufferLength: 30, 
+                            const hls = new Hls({
+                                liveSyncDurationCount: 3,
+                                liveMaxLatencyDurationCount: 10,
+                                lowLatencyMode: false,
+                                maxBufferLength: 15,
+                                maxMaxBufferLength: 30,
                                 maxBufferSize: 30 * 1000 * 1000
                             });
-                            hls.loadSource(srcUrl); hls.attachMedia(video);
+                            hls.loadSource(srcUrl);
+                            hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.FRAG_BUFFERED, () => {
                                 if (video._waitingForAd === true) {
@@ -953,12 +1053,13 @@
                                         video._waitingForAd = true;
                                         if (!video.paused) video.pause();
                                         video._adWaitTimer = setTimeout(() => {
-                                            video._waitingForAd = false; video._adWaitTimer = null;
+                                            video._waitingForAd = false;
+                                            video._adWaitTimer = null;
                                             console.warn('[hls] 广告等待超时，强制重新解析');
                                             if (lastRoomUrl) goWithUrl(lastRoomUrl);
                                         }, 30000);
                                     }
-                                    return; 
+                                    return;
                                 }
                                 if (!data.fatal) {
                                     if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR || data.details === Hls.ErrorDetails.BUFFER_NUDGE_ON_STALL) {
@@ -967,22 +1068,42 @@
                                     return;
                                 }
                                 if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                                    if (data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) { hls.currentLevel = -1; hls.startLoad(); video.play().catch(() => {}); return; }
+                                    if (data.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
+                                        hls.currentLevel = -1;
+                                        hls.startLoad();
+                                        video.play().catch(() => {});
+                                        return;
+                                    }
                                     if (data.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR || data.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
-                                        hls.destroy(); window._hlsInst = null; if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
-                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000); else showOfflineOverlay(currentAnchorName); return;
+                                        hls.destroy();
+                                        window._hlsInst = null;
+                                        if (video._hlsStallTimer) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; }
+                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
+                                        else showOfflineOverlay(currentAnchorName);
+                                        return;
                                     }
                                     video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
                                     if (video._hlsReParseCount <= 2) {
                                         setTimeout(() => { try { hls.startLoad(); video.play().catch(() => {}); } catch(err) { if (lastRoomUrl) goWithUrl(lastRoomUrl); } }, 2000);
-                                    } else { hls.destroy(); window._hlsInst = null; if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000); else showOfflineOverlay(currentAnchorName); }
+                                    } else {
+                                        hls.destroy();
+                                        window._hlsInst = null;
+                                        if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
+                                        else showOfflineOverlay(currentAnchorName);
+                                    }
                                 } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                                    hls.recoverMediaError(); setTimeout(() => { video.play().catch(() => {}); }, 500);
-                                } else { hls.destroy(); window._hlsInst = null; if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000); }
+                                    hls.recoverMediaError();
+                                    setTimeout(() => { video.play().catch(() => {}); }, 500);
+                                } else {
+                                    hls.destroy();
+                                    window._hlsInst = null;
+                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 1000);
+                                }
                             });
                             window._hlsInst = hls;
                         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                            video.src = srcUrl; video.play();
+                            video.src = srcUrl;
+                            video.play();
                         }
                     };
 
@@ -990,14 +1111,23 @@
 
                     let lastTime = -1, stallCount = 0;
                     video._hlsStallTimer = setInterval(() => {
-                        if (video._hlsId !== hlsId || !art || !video) { clearInterval(video._hlsStallTimer); video._hlsStallTimer = null; return; }
+                        if (video._hlsId !== hlsId || !art || !video) {
+                            clearInterval(video._hlsStallTimer);
+                            video._hlsStallTimer = null;
+                            return;
+                        }
                         const ct = video.currentTime;
                         if (ct === lastTime && !video.paused && !video.ended) {
                             stallCount++;
                             if (stallCount >= 4) {
-                                clearInterval(video._hlsStallTimer); video._hlsStallTimer = null;
+                                clearInterval(video._hlsStallTimer);
+                                video._hlsStallTimer = null;
                                 video._hlsReParseCount = (video._hlsReParseCount || 0) + 1;
-                                if (video._hlsReParseCount <= 3) { if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500); } else { showOfflineOverlay(currentAnchorName); }
+                                if (video._hlsReParseCount <= 3) {
+                                    if (lastRoomUrl) setTimeout(() => goWithUrl(lastRoomUrl), 500);
+                                } else {
+                                    showOfflineOverlay(currentAnchorName);
+                                }
                             }
                         } else { stallCount = 0; }
                         lastTime = ct;
@@ -1007,7 +1137,8 @@
         });
 
         art.on('ready', () => {
-            updateFollowBtn(lastRoomUrl); if (currentDanmakuRoom === lastRoomUrl) return;
+            updateFollowBtn(lastRoomUrl);
+            if (currentDanmakuRoom === lastRoomUrl) return;
             currentDanmakuRoom = lastRoomUrl;
 
             if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
@@ -1025,17 +1156,32 @@
             }
         });
 
-        art.on('video:volumechange', () => { if (art) { savedVolume = art.volume; savedMuted = art.muted; saveVolumeMemory(); } });
-        art.on('quality', (q) => { if (q && art.video && art.video._hlsStallTimer) { clearInterval(art.video._hlsStallTimer); art.video._hlsStallTimer = null; } });
+        art.on('video:volumechange', () => {
+            if (art) {
+                savedVolume = art.volume;
+                savedMuted = art.muted;
+                saveVolumeMemory();
+            }
+        });
+        art.on('quality', (q) => {
+            if (q && art.video && art.video._hlsStallTimer) {
+                clearInterval(art.video._hlsStallTimer);
+                art.video._hlsStallTimer = null;
+            }
+        });
     }
 
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden && art) {
-            const video = art.video; if (!video || video.paused) return;
+            const video = art.video;
+            if (!video || video.paused) return;
             if (window._hlsInst) {
                 try {
                     const livePos = window._hlsInst.liveSyncPosition;
-                    if (livePos && Math.abs(video.currentTime - livePos) > 3) { video.currentTime = livePos; video.play().catch(() => {}); }
+                    if (livePos && Math.abs(video.currentTime - livePos) > 3) {
+                        video.currentTime = livePos;
+                        video.play().catch(() => {});
+                    }
                 } catch(e) {}
             }
         }
@@ -1043,7 +1189,10 @@
 
     function setBtn(loading) {
         const btn = document.getElementById('btn-play');
-        if (btn) { btn.disabled = loading; btn.textContent = loading ? '…' : '播放'; }
+        if (btn) {
+            btn.disabled = loading;
+            btn.textContent = loading ? '…' : '播放';
+        }
     }
 
     // ==================== 标签页与弹幕开关 ====================
@@ -1054,27 +1203,52 @@
         const dmSwitch = document.getElementById('danmaku-switch');
         btns.forEach(btn => {
             btn.addEventListener('click', () => {
-                const tab = btn.dataset.tab; if (tab === currentTab) return;
-                currentTab = tab; btns.forEach(b => b.classList.remove('active')); btn.classList.add('active');
+                const tab = btn.dataset.tab;
+                if (tab === currentTab) return;
+                currentTab = tab;
+                btns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
                 const sp = document.getElementById('settings-panel');
                 if (tab === 'danmaku') {
-                    headerTitle.innerText = '弹幕列表'; dmSwitch.style.display = 'flex'; headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none'; followListDiv.style.display = 'none'; historyListDiv.style.display = 'none'; sp.style.display = 'none';
+                    headerTitle.innerText = '弹幕列表';
+                    dmSwitch.style.display = 'flex';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = danmakuEnabled ? 'flex' : 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'none';
+                    sp.style.display = 'none';
                 } else if (tab === 'follow') {
-                    headerTitle.innerText = '关注列表'; dmSwitch.style.display = 'none'; headerAction.style.display = 'block'; headerAction.innerText = '刷新';
+                    headerTitle.innerText = '关注列表';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'block';
+                    headerAction.innerText = '刷新';
                     headerAction.onclick = () => refreshAllFollowStatus();
-                    chatMessagesDiv.style.display = 'none'; followListDiv.style.display = 'flex'; historyListDiv.style.display = 'none'; sp.style.display = 'none';
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'flex';
+                    historyListDiv.style.display = 'none';
+                    sp.style.display = 'none';
                     renderFollowList();
                 } else if (tab === 'history') {
-                    headerTitle.innerText = '播放历史'; dmSwitch.style.display = 'none'; headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = 'none'; followListDiv.style.display = 'none'; historyListDiv.style.display = 'flex'; sp.style.display = 'none';
+                    headerTitle.innerText = '播放历史';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'flex';
+                    sp.style.display = 'none';
                     renderHistoryList();
                 } else if (tab === 'settings') {
-                    headerTitle.innerText = '设置'; dmSwitch.style.display = 'none'; headerAction.style.display = 'none';
-                    chatMessagesDiv.style.display = 'none'; followListDiv.style.display = 'none'; historyListDiv.style.display = 'none'; sp.style.display = 'flex';
+                    headerTitle.innerText = '设置';
+                    dmSwitch.style.display = 'none';
+                    headerAction.style.display = 'none';
+                    chatMessagesDiv.style.display = 'none';
+                    followListDiv.style.display = 'none';
+                    historyListDiv.style.display = 'none';
+                    sp.style.display = 'flex';
                     document.getElementById('soop-cookie-input').value = getSoopCookie();
                     document.getElementById('twitch-cookie-input').value = getTwitchCookie();
-                    const sc = getSoopCookie(); const tc = getTwitchCookie();
+                    const sc = getSoopCookie();
+                    const tc = getTwitchCookie();
                     document.getElementById('soop-cookie-status').textContent = sc ? `✅ 已保存 (${sc.length} 字符)` : '';
                     document.getElementById('twitch-cookie-status').textContent = tc ? `✅ 已保存 (${tc.length} 字符)` : '';
                 }
@@ -1115,19 +1289,30 @@
 
     window.go = () => { const url = document.getElementById('url').value.trim(); if (url) goWithUrl(url); };
     window.toggleFollow = () => {
-        const url = document.getElementById('url').value.trim() || lastRoomUrl; if (!url) return;
-        const follows = _loadFollows(); const idx = follows.findIndex(x => x.url === url);
-        if (idx >= 0) { follows.splice(idx, 1); } else {
-            let name = currentAnchorName; let platform = currentPlatform; let avatar = currentAvatar;
+        const url = document.getElementById('url').value.trim() || lastRoomUrl;
+        if (!url) return;
+        const follows = _loadFollows();
+        const idx = follows.findIndex(x => x.url === url);
+        if (idx >= 0) {
+            follows.splice(idx, 1);
+        } else {
+            let name = currentAnchorName;
+            let platform = currentPlatform;
+            let avatar = currentAvatar;
             const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'];
             if (!name || defaultNames.includes(name)) {
                 const defaultName = url.split('/').pop().split('?')[0] || '主播';
-                const customName = prompt('请输入该主播的备注名', defaultName); if (customName === null) return;
-                name = customName.trim() || defaultName; platform = getPlatformName(url); avatar = '';
+                const customName = prompt('请输入该主播的备注名', defaultName);
+                if (customName === null) return;
+                name = customName.trim() || defaultName;
+                platform = getPlatformName(url);
+                avatar = '';
             }
             follows.unshift({ url, name, platform, status: 'unknown', t: Date.now(), avatar: avatar || '' });
         }
-        _saveFollows(follows); updateFollowBtn(url); renderFollowList();
+        _saveFollows(follows);
+        updateFollowBtn(url);
+        renderFollowList();
     };
     window.openOriginalUrl = () => { if (lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
 
@@ -1136,38 +1321,62 @@
         chatMessagesDiv = document.getElementById('chat-messages');
         followListDiv = document.getElementById('follow-list');
         historyListDiv = document.getElementById('history-list');
-        loadVolumeMemory(); initTabs(); initDanmakuSwitch();
+        loadVolumeMemory();
+        initTabs();
+        initDanmakuSwitch();
 
         followListDiv.addEventListener('auxclick', (e) => {
-            if (e.button !== 1) return; const item = e.target.closest('.follow-item'); if (!item || !item.dataset.url) return;
-            e.preventDefault(); e.stopPropagation();
+            if (e.button !== 1) return;
+            const item = e.target.closest('.follow-item');
+            if (!item || !item.dataset.url) return;
+            e.preventDefault();
+            e.stopPropagation();
             window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
         }, true);
 
         followListDiv.addEventListener('click', (e) => {
             if (e.button !== 0) return;
             const del = e.target.closest('[data-del]');
-            if (del) { const idx = parseInt(del.dataset.del); const arr = _loadFollows(); arr.splice(idx, 1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
-            const item = e.target.closest('.follow-item'); if (item && item.dataset.url) playFromFollows(item.dataset.url);
+            if (del) {
+                const idx = parseInt(del.dataset.del);
+                const arr = _loadFollows();
+                arr.splice(idx, 1);
+                _saveFollows(arr);
+                renderFollowList();
+                updateFollowBtn(lastRoomUrl);
+                return;
+            }
+            const item = e.target.closest('.follow-item');
+            if (item && item.dataset.url) playFromFollows(item.dataset.url);
         });
         followListDiv.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
 
         historyListDiv.addEventListener('auxclick', (e) => {
-            if (e.button !== 1) return; const item = e.target.closest('.history-item'); if (!item || !item.dataset.url) return;
-            e.preventDefault(); e.stopPropagation();
+            if (e.button !== 1) return;
+            const item = e.target.closest('.history-item');
+            if (!item || !item.dataset.url) return;
+            e.preventDefault();
+            e.stopPropagation();
             window.open(window.location.origin + window.location.pathname + '?url=' + encodeURIComponent(item.dataset.url), '_blank');
         }, true);
 
         historyListDiv.addEventListener('click', (e) => {
             if (e.button !== 0) return;
-            const item = e.target.closest('.history-item'); if (item && item.dataset.url) playFromHistory(item.dataset.url);
+            const item = e.target.closest('.history-item');
+            if (item && item.dataset.url) playFromHistory(item.dataset.url);
         });
         historyListDiv.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });
 
-        renderFollowList(); renderHistoryList();
+        renderFollowList();
+        renderHistoryList();
         document.getElementById('url').addEventListener('keypress', (e) => { if (e.key === 'Enter') window.go(); });
-        const autoUrl = new URLSearchParams(window.location.search).get('url'); if (autoUrl) { document.getElementById('url').value = autoUrl; window.go(); }
-        setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000); refreshAllFollowStatus();
+        const autoUrl = new URLSearchParams(window.location.search).get('url');
+        if (autoUrl) {
+            document.getElementById('url').value = autoUrl;
+            window.go();
+        }
+        setInterval(() => refreshAllFollowStatus(), 5 * 60 * 1000);
+        refreshAllFollowStatus();
     }
     init();
 </script>
