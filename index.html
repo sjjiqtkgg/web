@@ -205,7 +205,7 @@
         document.getElementById('twitch-cookie-status').textContent = '✅ 已清除';
     };
 
-    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'&gt;'); }
+    function escapeHtml(str) { return String(str).replace(/[&<>]/g, m => m==='&'?'&amp;':m==='<'?'&lt;':'>'); }
 
     function showOfflineOverlay(anchorName) {
         const el = document.getElementById('offline-overlay');
@@ -268,7 +268,7 @@
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         let html = '';
         items.forEach(item => {
-            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${escapeHtml(item.avatar)}" alt="">` : '<div class="history-avatar"></div>';
+            let avatarHtml = item.avatar ? `<img class="history-avatar" src="${escapeHtml(item.avatar)}" alt="" referrerpolicy="no-referrer">` : '<div class="history-avatar"></div>';
             html += `<div class="history-item" data-url="${escapeHtml(item.url)}">${avatarHtml}<span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span><span class="history-time">${formatTime(item.time)}</span></div>`;
         });
         historyListDiv.innerHTML = html;
@@ -305,7 +305,7 @@
         let html = '';
         items.forEach((x, i) => {
             const statusText = x.status === 'online' ? '直播中' : '未开播';
-            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${escapeHtml(x.avatar)}" alt="">` : '<div class="follow-avatar"></div>';
+            const avatarHtml = x.avatar ? `<img class="follow-avatar" src="${escapeHtml(x.avatar)}" alt="" referrerpolicy="no-referrer">` : '<div class="follow-avatar"></div>';
             html += `<div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">${avatarHtml}<span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span><span class="follow-status ${x.status}">${statusText}</span><span class="follow-delete" data-del="${i}">✕</span></div>`;
         });
         followListDiv.innerHTML = html;
@@ -332,7 +332,7 @@
         const toast = document.createElement('div');
         toast.className = 'page-toast';
         toast.innerHTML = `
-            <div class="toast-icon">${avatar ? `<img src="${escapeHtml(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">` : '🔔'}</div>
+            <div class="toast-icon">${avatar ? `<img src="${escapeHtml(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer">` : '🔔'}</div>
             <div class="toast-body">
                 <div class="toast-title">${escapeHtml(platform || '')} ${escapeHtml(name || '主播')} 开播了！</div>
                 <div class="toast-sub">点击立即观看 →</div>
