@@ -172,12 +172,56 @@
 
     window.addEventListener('error', e => { if (e.message && e.message.includes('SourceBuffer has been removed')) { e.preventDefault(); e.stopPropagation(); } }, true);
 
+    // ==================== 本地存储（🔴 必须存在的函数，之前版本遗漏，现已补全） ====================
+    function _loadFollows() {
+        try {
+            const raw = localStorage.getItem('ps_follows');
+            const arr = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(arr)) return [];
+            return arr.filter(item => item && typeof item === 'object' && item.url);
+        } catch(e) { return []; }
+    }
+
+    function _saveFollows(arr) {
+        // 防御：如果旧列表有数据，新列表为空，拒绝保存（避免误清空）
+        const old = _loadFollows();
+        if (old.length > 0 && arr.length === 0) {
+            console.error('[关注] 阻止保存空列表，旧列表长度:', old.length);
+            return;
+        }
+        try { localStorage.setItem('ps_follows', JSON.stringify(arr.slice(0, 100))); } catch(e) {}
+    }
+
+    function _loadHistory() {
+        try { return JSON.parse(localStorage.getItem('ps_history') || '[]'); } catch(e) { return []; }
+    }
+
+    function _saveHistory(arr) {
+        try { localStorage.setItem('ps_history', JSON.stringify(arr.slice(0, HISTORY_MAX))); } catch(e) {}
+    }
+
+    function getSoopCookie() {
+        try { return localStorage.getItem('ps_soop_cookie') || ''; } catch(e) { return ''; }
+    }
+
+    function saveSoopCookie(v) {
+        try { localStorage.setItem('ps_soop_cookie', v); } catch(e) {}
+    }
+
+    function getTwitchCookie() {
+        try { return localStorage.getItem('ps_twitch_cookie') || ''; } catch(e) { return ''; }
+    }
+
+    function saveTwitchCookie(v) {
+        try { localStorage.setItem('ps_twitch_cookie', v); } catch(e) {}
+    }
+
     // ==================== 全局变量 ====================
     let art = null, lastRoomUrl = '', savedVolume = 0.5, savedMuted = true;
     let currentAnchorName = '', currentPlatform = '', currentAvatar = '';
     let danmakuEnabled = true, currentTab = 'danmaku';
     let dmManager = new DanmakuManager();  // 统一弹幕管理器
-    let dmConfig = null;                   // 【新增】虎牙弹幕配置
+    let dmConfig = null;                   // 虎牙弹幕配置
     let currentDanmakuRoom = '';
     const CHAT_MAX = 300;
     let chatMessagesDiv = null, followListDiv = null, historyListDiv = null, sortable = null;
@@ -479,7 +523,6 @@
                 <span class="follow-delete" data-del="${i}">✕</span>
             </div>`).join('');
         if (sortable) sortable.destroy();
-        // 补丁3：拖拽排序用URL标识，而非索引
         sortable = new Sortable(followListDiv, { animation: 150, onEnd: () => {
             const newItems = [];
             followListDiv.querySelectorAll('.follow-item').forEach(el => {
@@ -505,7 +548,6 @@
         setTimeout(() => { if (toast.parentNode) { toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); } }, 6000);
     }
 
-    // 补丁2：优雅的错误 Toast
     function showErrorToast(msg) {
         const container = document.querySelector('.page-toast-container') || (()=>{const c=document.createElement('div');c.className='page-toast-container';document.body.appendChild(c);return c;})();
         const toast = document.createElement('div');
@@ -524,12 +566,10 @@
         for (let i = 0; i < items.length; i += 3) {
             await Promise.all(items.slice(i, i+3).map(async item => {
                 try {
-                    // 补丁1：使用轻量级 /api/status 接口
                     const r = await fetch(`${API_BASE}/api/status?url=${encodeURIComponent(item.url)}`);
                     if (!r.ok) { item.status = 'error'; return; }
                     const d = await r.json();
                     item.status = d.isLive ? 'online' : 'offline';
-                    // 如果需要更新头像，可以在检测到 online 时再单独请求，或保持原样
                 } catch(e) { item.status = 'error'; }
             }));
         }
@@ -599,7 +639,6 @@
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     updateFavicon(currentAvatar);
-                    // 【新增】保存虎牙弹幕参数
                     dmConfig = data.danmaku || null;
                     if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
                     if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
