@@ -471,7 +471,7 @@
             const removeCount = chatMessagesDiv.children.length - CHAT_MAX;
             for(let i=0;i<removeCount;i++) chatMessagesDiv.removeChild(chatMessagesDiv.firstChild);
         }
-        if(chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 150 || document.hidden) chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
+        if(chatMessagesDiv.scrollHeight - chatMessagesDiv.scrollTop - chatMessagesDiv.clientHeight < 200 || document.hidden) chatMessagesDiv.scrollTop = chatMessagesDiv.scrollHeight;
     }
 
     // ==================== 播放器核心 ====================
