@@ -177,6 +177,7 @@
     let currentAnchorName = '', currentPlatform = '', currentAvatar = '';
     let danmakuEnabled = true, currentTab = 'danmaku';
     let dmManager = new DanmakuManager();  // 统一弹幕管理器
+    let dmConfig = null;                   // 【新增】虎牙弹幕配置
     let currentDanmakuRoom = '';
     const CHAT_MAX = 300;
     let chatMessagesDiv = null, followListDiv = null, historyListDiv = null, sortable = null;
@@ -598,6 +599,8 @@
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
                     updateFavicon(currentAvatar);
+                    // 【新增】保存虎牙弹幕参数
+                    dmConfig = data.danmaku || null;
                     if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
                     if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
