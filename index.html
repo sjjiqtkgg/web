@@ -164,10 +164,41 @@
 
     function handleImgError(img) { img.onerror = null; img.src = defaultAvatar; }
 
-    function updateFavicon(avatarUrl) {
+    // 平台 favicon 映射表（指向官方 favicon.ico）
+    const PLATFORM_FAVICON_MAP = {
+        '虎牙': 'https://www.huya.com/favicon.ico',
+        '斗鱼': 'https://www.douyu.com/favicon.ico',
+        'B站': 'https://www.bilibili.com/favicon.ico',
+        '抖音': 'https://www.douyin.com/favicon.ico',
+        'Twitch': 'https://www.twitch.tv/favicon.ico',
+        'PandaTV': 'https://www.pandalive.co.kr/favicon.ico',
+        'SOOP': 'https://play.sooplive.com/favicon.ico',
+        '直链': null,    // 使用默认图标
+        '未知': null
+    };
+
+    function updateFaviconByPlatform(platform) {
+        const iconUrl = PLATFORM_FAVICON_MAP[platform];
+        const defaultIcon = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="40" fill="%23333"/%3E%3Ctext x="50" y="55" text-anchor="middle" fill="%23666" font-size="40"%3E📺%3C/text%3E%3C/svg%3E';
+
         let link = document.querySelector("link[rel*='icon']");
-        if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
-        link.href = avatarUrl || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="40" fill="%23333"/%3E%3Ctext x="50" y="55" text-anchor="middle" fill="%23666" font-size="40"%3E📺%3C/text%3E%3C/svg%3E';
+        if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+        }
+
+        if (!iconUrl) {
+            link.href = defaultIcon;
+            return;
+        }
+
+        // 尝试加载平台真实 favicon，失败则回退到默认图标
+        link.href = iconUrl;
+        link.onerror = function() {
+            link.href = defaultIcon;
+            link.onerror = null;
+        };
     }
 
     window.addEventListener('error', e => { if (e.message && e.message.includes('SourceBuffer has been removed')) { e.preventDefault(); e.stopPropagation(); } }, true);
@@ -532,7 +563,7 @@
                     streams = data.streams.map(s=>({...s, url:ensureHttps(s.url)}));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     currentAvatar = data.avatar || '';
-                    updateFavicon(currentAvatar);
+                    updateFaviconByPlatform(currentPlatform);
                     dmConfig = data.danmaku || null;
                     if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
                     if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
@@ -554,7 +585,7 @@
         } else if(isCDN){
             const fileName = raw.split('/').pop().split('?')[0] || '直链';
             streams = [{ cdn:'直链', url:ensureHttps(raw), type: raw.includes('.m3u8')?'m3u8':'flv' }];
-            currentAnchorName = fileName; currentAvatar=''; currentPlatform='直链'; dmConfig=null; updateFavicon(null);
+            currentAnchorName = fileName; currentAvatar=''; currentPlatform='直链'; dmConfig=null; updateFaviconByPlatform('直链');
         } else { setBtn(false); return; }
 
         updatePageTitle(currentAnchorName, currentPlatform);
