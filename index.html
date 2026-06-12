@@ -231,7 +231,14 @@
         let mut = localStorage.getItem('ps_muted');
         if (mut !== null) savedMuted = mut === 'true';
     }
-    function saveVolumeMemory() { localStorage.setItem('ps_volume', savedVolume); localStorage.setItem('ps_muted', savedMuted); }
+    let _volumeSaveTimer = null;
+    function saveVolumeMemory() {
+        clearTimeout(_volumeSaveTimer);
+        _volumeSaveTimer = setTimeout(() => {
+            localStorage.setItem('ps_volume', savedVolume);
+            localStorage.setItem('ps_muted', savedMuted);
+        }, 300);
+    }
 
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
@@ -317,20 +324,51 @@
         const items = _loadFollows();
         if (!items.length) return;
         const before = {}; items.forEach(i => before[i.url] = i.status);
-        for (let i = 0; i < items.length; i += 3) {
-            await Promise.all(items.slice(i, i+3).map(async item => {
-                try {
-                    let ck = '';
-                    if(item.url.includes('sooplive.com')) ck = getSoopCookie();
-                    else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
-                    const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
-                    if (r.status === 400) { item.status = 'offline'; return; }
-                    const d = await r.json();
-                    item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
-                    if (d.avatar) item.avatar = d.avatar;
-                } catch(e) { item.status = 'error'; }
-            }));
+
+        const buildPayload = () => items.map(item => {
+            let ck = '';
+            if(item.url.includes('sooplive.com')) ck = getSoopCookie();
+            else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
+            return { url: item.url, cookie: ck };
+        });
+
+        try {
+            const payload = buildPayload();
+            const byUrl = {};
+            for (let i = 0; i < payload.length; i += 30) {
+                const r = await fetch(`${API_BASE}/api/follows/batch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items: payload.slice(i, i+30) })
+                });
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                const data = await r.json();
+                (data.results || []).forEach(res => { byUrl[res.url] = res; });
+            }
+            items.forEach(item => {
+                const d = byUrl[item.url];
+                if (!d) { item.status = 'error'; return; }
+                item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
+                if (d.avatar) item.avatar = d.avatar;
+            });
+        } catch (e) {
+            // 批量接口不可用时（如未部署/网络问题），回退到逐条请求，分批避免一次性打满
+            for (let i = 0; i < items.length; i += 3) {
+                await Promise.all(items.slice(i, i+3).map(async item => {
+                    try {
+                        let ck = '';
+                        if(item.url.includes('sooplive.com')) ck = getSoopCookie();
+                        else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
+                        const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
+                        if (r.status === 400) { item.status = 'offline'; return; }
+                        const d = await r.json();
+                        item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
+                        if (d.avatar) item.avatar = d.avatar;
+                    } catch(e) { item.status = 'error'; }
+                }));
+            }
         }
+
         _saveFollows(items); renderFollowList();
         items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online') showPageToast(item.platform, item.name, item.avatar, item.url); });
     }
@@ -479,7 +517,17 @@
                 if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
                 if(_currentFetchAbort !== abortCtrl) return;
-                if(data.error) throw new Error(data.error);
+                if(data.error){
+                    // SOOP 19+ 限制：不显示"未开播"蒙层，引导用户去设置页填 Cookie
+                    if(raw.includes('sooplive.com') && (data.error.includes('19+') || data.error.includes('Cookie'))){
+                        currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                        if(confirm(`${data.error}\n\n是否现在前往设置页填写 SOOP Cookie？`)){
+                            switchTab('settings');
+                        }
+                        setBtn(false); return;
+                    }
+                    throw new Error(data.error);
+                }
                 if(data.streams?.length){
                     streams = data.streams.map(s=>({...s, url:ensureHttps(s.url)}));
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
@@ -490,7 +538,7 @@
                     if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
                 } else {
-                    alert(`解析失败：${data?.error||'主播可能未开播或链接无效'}`);
+                    alert(`解析失败：主播可能未开播或链接无效`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName);
                     setBtn(false); return;
@@ -500,6 +548,7 @@
                 if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
                     if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
                 }
+                alert(`解析失败：${e.message}`);
                 setBtn(false); return;
             }
         } else if(isCDN){
@@ -663,20 +712,23 @@
     function setBtn(loading){ const btn = document.getElementById('btn-play'); if(btn){ btn.disabled=loading; btn.textContent=loading?'…':'播放'; } }
 
     // ==================== 标签页与弹幕开关 ====================
-    function initTabs() {
+    function switchTab(tab) {
         const btns = document.querySelectorAll('.bar-tab');
         const headerTitle = document.getElementById('header-title');
         const headerAction = document.getElementById('header-action');
         const dmSwitch = document.getElementById('danmaku-switch');
-        btns.forEach(btn => btn.addEventListener('click', () => {
-            const tab = btn.dataset.tab; if(tab===currentTab) return;
-            currentTab = tab; btns.forEach(b=>b.classList.remove('active')); btn.classList.add('active');
-            const sp = document.getElementById('settings-panel');
-            if(tab==='danmaku'){ headerTitle.innerText='弹幕列表'; dmSwitch.style.display='flex'; headerAction.style.display='none'; chatMessagesDiv.style.display=danmakuEnabled?'flex':'none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='none'; }
-            else if(tab==='follow'){ headerTitle.innerText='关注列表'; dmSwitch.style.display='none'; headerAction.style.display='block'; headerAction.innerText='刷新'; headerAction.onclick=refreshAllFollowStatus; chatMessagesDiv.style.display='none'; followListDiv.style.display='flex'; historyListDiv.style.display='none'; sp.style.display='none'; renderFollowList(); }
-            else if(tab==='history'){ headerTitle.innerText='播放历史'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='flex'; sp.style.display='none'; renderHistoryList(); }
-            else if(tab==='settings'){ headerTitle.innerText='设置'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='flex'; document.getElementById('soop-cookie-input').value=getSoopCookie(); document.getElementById('twitch-cookie-input').value=getTwitchCookie(); document.getElementById('soop-cookie-status').textContent=getSoopCookie()?`✅ 已保存 (${getSoopCookie().length} 字符)`:''; document.getElementById('twitch-cookie-status').textContent=getTwitchCookie()?`✅ 已保存 (${getTwitchCookie().length} 字符)`:''; }
-        }));
+        const sp = document.getElementById('settings-panel');
+        if(tab===currentTab) return;
+        currentTab = tab; btns.forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+        if(tab==='danmaku'){ headerTitle.innerText='弹幕列表'; dmSwitch.style.display='flex'; headerAction.style.display='none'; chatMessagesDiv.style.display=danmakuEnabled?'flex':'none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='none'; }
+        else if(tab==='follow'){ headerTitle.innerText='关注列表'; dmSwitch.style.display='none'; headerAction.style.display='block'; headerAction.innerText='刷新'; headerAction.onclick=refreshAllFollowStatus; chatMessagesDiv.style.display='none'; followListDiv.style.display='flex'; historyListDiv.style.display='none'; sp.style.display='none'; renderFollowList(); }
+        else if(tab==='history'){ headerTitle.innerText='播放历史'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='flex'; sp.style.display='none'; renderHistoryList(); }
+        else if(tab==='settings'){ headerTitle.innerText='设置'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='flex'; document.getElementById('soop-cookie-input').value=getSoopCookie(); document.getElementById('twitch-cookie-input').value=getTwitchCookie(); document.getElementById('soop-cookie-status').textContent=getSoopCookie()?`✅ 已保存 (${getSoopCookie().length} 字符)`:''; document.getElementById('twitch-cookie-status').textContent=getTwitchCookie()?`✅ 已保存 (${getTwitchCookie().length} 字符)`:''; }
+    }
+
+    function initTabs() {
+        const btns = document.querySelectorAll('.bar-tab');
+        btns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
     }
 
     function initDanmakuSwitch() {
