@@ -171,7 +171,7 @@
         'B站': 'https://www.bilibili.com/favicon.ico',
         '抖音': 'https://www.douyin.com/favicon.ico',
         'Twitch': 'https://www.twitch.tv/favicon.ico',
-        'PandaTV': 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#FFCC00"/><text x="50" y="72" text-anchor="middle" fill="white" font-size="55" font-family="Arial">🐼</text></svg>'),
+        'PandaTV': 'https://www.pandalive.co.kr/favicon.ico',
         'SOOP': 'https://play.sooplive.com/favicon.ico',
         '直链': null,    // 使用默认图标
         '未知': null
@@ -608,51 +608,29 @@
     }
 
     function playStream(streams) {
-        // 1. 先获取旧 video 元素，并在销毁 Artplayer 前清理底层实例
+        // 1. 先拿旧 video 引用，在 Artplayer 销毁（会移除/替换 <video>）之前清理底层播放器实例与定时器，
+        //    避免旧实例的回调在分离的 DOM 节点上继续触发，误判卡顿并对新地址反复重连。
         const oldVideo = document.querySelector('#player video');
-
-        // 2. 如果有 FLV 实例，先置空引用再销毁
-        if (oldVideo && oldVideo._mpegts) {
-            const oldMpegts = oldVideo._mpegts;
-            oldVideo._mpegts = null;          // ★ 先置空，防止销毁过程中触发回调
-            clearInterval(oldVideo._stallTimer);
-            oldVideo._stallTimer = null;
-            try {
-                oldMpegts.pause();
-                oldMpegts.unload();
-                oldMpegts.detachMediaElement();
-                oldMpegts.destroy();
-            } catch(e) {}
+        if(oldVideo){
+            if(oldVideo._stallTimer){ clearInterval(oldVideo._stallTimer); oldVideo._stallTimer=null; }
+            if(oldVideo._hlsStallTimer){ clearInterval(oldVideo._hlsStallTimer); oldVideo._hlsStallTimer=null; }
+            if(oldVideo._adWaitTimer){ clearTimeout(oldVideo._adWaitTimer); oldVideo._adWaitTimer=null; }
+            oldVideo._playerId = -1; oldVideo._hlsId = -1; // 使旧回调里的 id 比对必然失败
+            if(oldVideo._mpegts){
+                const _old=oldVideo._mpegts; oldVideo._mpegts=null;
+                try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){}
+            }
         }
+        if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
 
-        // 3. 如果有 HLS 实例，同样先置空再销毁
-        if (window._hlsInst) {
-            const oldHls = window._hlsInst;
-            window._hlsInst = null;
-            try {
-                oldHls.stopLoad();
-                oldHls.detachMedia();
-                oldHls.destroy();
-            } catch(e) {}
-        }
-
-        // 4. 最后销毁 Artplayer
-        if (art) {
-            try {
-                if (art.video) {
-                    art.video.pause();
-                    if (art.video.srcObject) art.video.srcObject = null;
-                    art.video.removeAttribute('src');
-                    // 二次确保 video 上的引用被清空（正常已在前面执行）
-                    art.video._mpegts = null;
-                    art.video._stallTimer = null;
-                }
+        // 2. 现在再安全销毁 Artplayer
+        if(art){
+            try{
+                if(art.video){ art.video.pause(); if(art.video.srcObject) art.video.srcObject=null; art.video.removeAttribute('src'); }
                 art.destroy(true);
-            } catch(e) { console.warn('Artplayer 销毁异常:', e); }
+            } catch(e){ console.warn('Artplayer销毁异常:', e); }
             art = null;
         }
-
-        // 5. 最后清空容器（此时 video 已经被 Artplayer 销毁或由我们手动移除）
         document.getElementById('player').innerHTML = '';
 
         let defaultIndex = 0;
@@ -731,10 +709,11 @@
                             hls.loadSource(srcUrl); hls.attachMedia(video);
                             hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
                             hls.on(Hls.Events.FRAG_BUFFERED, () => {
+                                if(video._hlsId !== hlsId || window._hlsInst !== hls) return;
                                 if(video._waitingForAd === true){ video._waitingForAd=false; if(video._adWaitTimer){ clearTimeout(video._adWaitTimer); video._adWaitTimer=null; } if(hls.liveSyncPosition) video.currentTime = hls.liveSyncPosition; video.play().catch(()=>{}); }
                             });
                             hls.on(Hls.Events.ERROR, (e, data) => {
-                                if(video._hlsId !== hlsId) return;
+                                if(video._hlsId !== hlsId || window._hlsInst !== hls) return;
                                 if(data.details === Hls.ErrorDetails.LEVEL_EMPTY_ERROR || data.details === 'levelEmptyError'){
                                     if(!video._waitingForAd){ video._waitingForAd = true; if(!video.paused) video.pause(); video._adWaitTimer = setTimeout(()=>{ video._waitingForAd=false; video._adWaitTimer=null; console.warn('[hls] 广告等待超时，强制重新解析'); guardedReconnect(lastRoomUrl, 0); }, 30000); }
                                     return;
