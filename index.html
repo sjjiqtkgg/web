@@ -608,17 +608,51 @@
     }
 
     function playStream(streams) {
-        // 安全销毁旧播放器
-        if(art){
-            try{
-                if(art.video){ art.video.pause(); if(art.video.srcObject) art.video.srcObject=null; art.video.removeAttribute('src'); }
+        // 1. 先获取旧 video 元素，并在销毁 Artplayer 前清理底层实例
+        const oldVideo = document.querySelector('#player video');
+
+        // 2. 如果有 FLV 实例，先置空引用再销毁
+        if (oldVideo && oldVideo._mpegts) {
+            const oldMpegts = oldVideo._mpegts;
+            oldVideo._mpegts = null;          // ★ 先置空，防止销毁过程中触发回调
+            clearInterval(oldVideo._stallTimer);
+            oldVideo._stallTimer = null;
+            try {
+                oldMpegts.pause();
+                oldMpegts.unload();
+                oldMpegts.detachMediaElement();
+                oldMpegts.destroy();
+            } catch(e) {}
+        }
+
+        // 3. 如果有 HLS 实例，同样先置空再销毁
+        if (window._hlsInst) {
+            const oldHls = window._hlsInst;
+            window._hlsInst = null;
+            try {
+                oldHls.stopLoad();
+                oldHls.detachMedia();
+                oldHls.destroy();
+            } catch(e) {}
+        }
+
+        // 4. 最后销毁 Artplayer
+        if (art) {
+            try {
+                if (art.video) {
+                    art.video.pause();
+                    if (art.video.srcObject) art.video.srcObject = null;
+                    art.video.removeAttribute('src');
+                    // 二次确保 video 上的引用被清空（正常已在前面执行）
+                    art.video._mpegts = null;
+                    art.video._stallTimer = null;
+                }
                 art.destroy(true);
-            } catch(e){ console.warn('Artplayer销毁异常:', e); }
+            } catch(e) { console.warn('Artplayer 销毁异常:', e); }
             art = null;
         }
-        if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
-        const ov = document.querySelector('#player video');
-        if(ov?._mpegts){ const _old=ov._mpegts; ov._mpegts=null; try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){} }
+
+        // 5. 最后清空容器（此时 video 已经被 Artplayer 销毁或由我们手动移除）
         document.getElementById('player').innerHTML = '';
 
         let defaultIndex = 0;
