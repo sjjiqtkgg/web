@@ -151,7 +151,6 @@
         if (!url) return false;
         const foreignKeywords = [
             'jtvnw.net', 'ttvnw.net', 'sooplive', 'pandalive', 'twitch',
-            'douyinpic.com', 'amemv.com', 'byteimg.com', 'snssdk.com'
         ];
         return foreignKeywords.some(kw => url.toLowerCase().includes(kw));
     }
@@ -163,6 +162,83 @@
     }
 
     function handleImgError(img) { img.onerror = null; img.src = defaultAvatar; }
+
+    // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
+    const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
+
+    function _avKey(roomUrl) {
+        // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
+        return 'av2_' + roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+    }
+
+    function getAvatarCache(roomUrl) {
+        try {
+            const raw = localStorage.getItem(_avKey(roomUrl));
+            if (!raw) return null;
+            const { u, t } = JSON.parse(raw);
+            if (Date.now() - t > AVATAR_CACHE_TTL) { localStorage.removeItem(_avKey(roomUrl)); return null; }
+            return u;
+        } catch { return null; }
+    }
+
+    function setAvatarCache(roomUrl, finalUrl) {
+        if (!roomUrl || !finalUrl || finalUrl === defaultAvatar) return;
+        try { localStorage.setItem(_avKey(roomUrl), JSON.stringify({ u: finalUrl, t: Date.now() })); } catch {}
+    }
+
+    /**
+     * 为 <img> 元素加载头像，支持本地缓存（stale-while-revalidate）
+     * 策略：本地缓存 → Worker代理 → 原始直链 → 默认头像
+     * 任何一环成功加载后，立即写入缓存供下次离线使用。
+     *
+     * @param {HTMLImageElement} img        目标 <img> 元素
+     * @param {string} originalUrl          后端返回的原始头像 URL
+     * @param {string} cacheKey             唯一标识，通常是直播间 URL
+     */
+    function applyAvatar(img, originalUrl, cacheKey) {
+        if (!img) return;
+        const workerUrl = getFinalAvatarUrl(originalUrl); // Worker代理URL 或 直链
+        const cached = cacheKey ? getAvatarCache(cacheKey) : null;
+
+        function tryLoad(src, onOk, onFail) {
+            if (!src || src === defaultAvatar) { onFail && onFail(); return; }
+            img.onload = () => { img.onload = img.onerror = null; onOk && onOk(src); };
+            img.onerror = () => { img.onerror = null; onFail && onFail(); };
+            img.src = src;
+        }
+
+        function fallbackChain() {
+            // 链：workerUrl → originalUrl（直连兜底）→ defaultAvatar
+            tryLoad(workerUrl,
+                (src) => { if (cacheKey) setAvatarCache(cacheKey, src); },
+                () => {
+                    if (originalUrl && originalUrl !== workerUrl) {
+                        tryLoad(originalUrl,
+                            (src) => { if (cacheKey) setAvatarCache(cacheKey, src); },
+                            () => { img.src = defaultAvatar; }
+                        );
+                    } else { img.src = defaultAvatar; }
+                }
+            );
+        }
+
+        if (cached) {
+            // 本地有缓存：立即显示，后台静默刷新
+            tryLoad(cached,
+                () => {
+                    // 后台刷新（不影响当前显示）
+                    if (workerUrl && workerUrl !== cached) {
+                        const t = new Image();
+                        t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
+                        t.src = workerUrl;
+                    }
+                },
+                () => fallbackChain()  // 缓存URL失效则走正常链
+            );
+        } else {
+            fallbackChain();
+        }
+    }
 
     // 平台 favicon 映射表（指向官方 favicon.ico）
     const PLATFORM_FAVICON_MAP = {
@@ -305,10 +381,13 @@
         if (!items.length) { historyListDiv.innerHTML = '<div class="empty-chat">暂无播放历史</div>'; return; }
         historyListDiv.innerHTML = items.map(item => `
             <div class="history-item" data-url="${escapeHtml(item.url)}">
-                <img class="history-avatar" src="${getFinalAvatarUrl(item.avatar)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+                <img class="history-avatar" src="${defaultAvatar}" data-av="${escapeHtml(item.avatar||'')}" data-ck="${escapeHtml(item.url)}" loading="lazy" referrerpolicy="no-referrer">
                 <span class="history-info">${escapeHtml(item.platform + ' ' + item.name)}</span>
                 <span class="history-time">${formatTime(item.time)}</span>
             </div>`).join('');
+        historyListDiv.querySelectorAll('img.history-avatar').forEach(img => {
+            applyAvatar(img, img.dataset.av, img.dataset.ck);
+        });
     }
 
     function playFromHistory(url) { document.getElementById('url').value = url; window.go(); }
@@ -324,11 +403,15 @@
         if (!items.length) { followListDiv.innerHTML = '<div class="empty-chat">暂无关注</div>'; sortable?.destroy(); sortable = null; return; }
         followListDiv.innerHTML = items.map((x, i) => `
             <div class="follow-item" data-id="${i}" data-url="${escapeHtml(x.url)}">
-                <img class="follow-avatar" src="${getFinalAvatarUrl(x.avatar)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.onerror=null;this.src='${defaultAvatar}';">
+                <img class="follow-avatar" src="${defaultAvatar}" data-av="${escapeHtml(x.avatar||'')}" data-ck="${escapeHtml(x.url)}" loading="lazy" referrerpolicy="no-referrer">
                 <span class="follow-info">${escapeHtml(x.platform + ' ' + x.name)}</span>
                 <span class="follow-status ${x.status}">${x.status === 'online' ? '直播中' : '未开播'}</span>
                 <span class="follow-delete" data-del="${i}">✕</span>
             </div>`).join('');
+        // 头像缓存加载（data-av / data-ck → applyAvatar）
+        followListDiv.querySelectorAll('img.follow-avatar').forEach(img => {
+            applyAvatar(img, img.dataset.av, img.dataset.ck);
+        });
         if (sortable) sortable.destroy();
         sortable = new Sortable(followListDiv, { animation: 150, onEnd: () => {
             const newItems = [];
@@ -344,8 +427,10 @@
         const toast = document.createElement('div');
         toast.className = 'page-toast';
         toast.innerHTML = `
-            <div class="toast-icon"><img src="${getFinalAvatarUrl(avatar)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';"></div>
+            <div class="toast-icon"><img src="${defaultAvatar}" data-av="${escapeHtml(avatar||'')}" data-ck="${escapeHtml(url)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer"></div>
             <div class="toast-body"><div class="toast-title">${escapeHtml(platform||'')} ${escapeHtml(name||'主播')} 开播了！</div><div class="toast-sub">点击立即观看 →</div></div>`;
+        const img = toast.querySelector('img[data-av]');
+        if (img) applyAvatar(img, img.dataset.av, img.dataset.ck);
         toast.onclick = () => { document.getElementById('url').value = url; window.go(); toast.remove(); };
         container.appendChild(toast);
         setTimeout(() => { if (toast.parentNode) { toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); } }, 6000);
