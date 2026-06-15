@@ -166,9 +166,9 @@
     // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
 
-    function _avKey(roomUrl) {
-        // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
-        return 'av2_' + roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
+    function _avKey(url) {
+        const m = url.match(/\/\/([^/]+).*?([^/?#]{4,30})(?:[/?#]|$)/);
+        return 'av2_' + (m ? m[1].slice(0,20) + '_' + m[2] : url.slice(-40)).replace(/\W/g,'_');
     }
 
     function getAvatarCache(roomUrl) {
@@ -230,6 +230,7 @@
                     if (workerUrl && workerUrl !== cached) {
                         const t = new Image();
                         t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
+                        t.onerror = () => {};  // 静默失败，不影响当前显示
                         t.src = workerUrl;
                     }
                 },
@@ -437,6 +438,7 @@
     }
 
     async function refreshAllFollowStatus() {
+        if (document.hidden) return;
         const items = _loadFollows();
         if (!items.length) return;
         const before = {}; items.forEach(i => before[i.url] = i.status);
@@ -891,7 +893,10 @@
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl; if(!url) return;
         const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
-        if(idx>=0) follows.splice(idx,1);
+        if(idx>=0) {
+            const removed = follows.splice(idx, 1)[0];
+            if (removed?.url) localStorage.removeItem(_avKey(removed.url));  // 清理头像缓存
+        }
         else {
             let name=currentAnchorName, platform=currentPlatform, avatar=currentAvatar;
             if(!name||['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'].includes(name)){
@@ -915,7 +920,14 @@
         followListDiv.addEventListener('click', e => {
             if(e.button!==0) return;
             const del = e.target.closest('[data-del]');
-            if(del){ const arr=_loadFollows(); arr.splice(parseInt(del.dataset.del),1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
+            if(del){
+                const arr=_loadFollows();
+                const index = parseInt(del.dataset.del);
+                const removed = arr.splice(index, 1)[0];
+                if (removed?.url) localStorage.removeItem(_avKey(removed.url));  // 清理头像缓存
+                _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl);
+                return;
+            }
             const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
         followListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
