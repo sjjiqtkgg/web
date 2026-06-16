@@ -166,9 +166,12 @@
     // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
 
-    function _avKey(url) {
-        const m = url.match(/\/\/([^/]+).*?([^/?#]{4,30})(?:[/?#]|$)/);
-        return 'av2_' + (m ? m[1].slice(0,20) + '_' + m[2] : url.slice(-40)).replace(/\W/g,'_');
+    function _avKey(roomUrl) {
+        // 简单字符串哈希（DJB2 变体），避免不同 URL 末尾相同字符导致 key 冲突
+        let h = 5381;
+        for (let i = 0; i < roomUrl.length; i++) { h = ((h << 5) + h + roomUrl.charCodeAt(i)) | 0; }
+        const safeTail = roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-30);
+        return 'av2_' + (h >>> 0).toString(36) + '_' + safeTail;
     }
 
     function getAvatarCache(roomUrl) {
@@ -229,8 +232,8 @@
                     // 后台刷新（不影响当前显示）
                     if (workerUrl && workerUrl !== cached) {
                         const t = new Image();
-                        t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
-                        t.onerror = () => {};  // 静默失败，不影响当前显示
+                        t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); t.onload = t.onerror = null; };
+                        t.onerror = () => { t.onload = t.onerror = null; }; // 静默失败，不影响当前已显示的缓存头像
                         t.src = workerUrl;
                     }
                 },
@@ -438,7 +441,7 @@
     }
 
     async function refreshAllFollowStatus() {
-        if (document.hidden) return;
+        if (document.hidden) return; // 标签页在后台时跳过，避免持续打后端无效请求
         const items = _loadFollows();
         if (!items.length) return;
         const before = {}; items.forEach(i => before[i.url] = i.status);
@@ -893,10 +896,7 @@
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl; if(!url) return;
         const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
-        if(idx>=0) {
-            const removed = follows.splice(idx, 1)[0];
-            if (removed?.url) localStorage.removeItem(_avKey(removed.url));  // 清理头像缓存
-        }
+        if(idx>=0) follows.splice(idx,1);
         else {
             let name=currentAnchorName, platform=currentPlatform, avatar=currentAvatar;
             if(!name||['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'].includes(name)){
@@ -922,11 +922,9 @@
             const del = e.target.closest('[data-del]');
             if(del){
                 const arr=_loadFollows();
-                const index = parseInt(del.dataset.del);
-                const removed = arr.splice(index, 1)[0];
-                if (removed?.url) localStorage.removeItem(_avKey(removed.url));  // 清理头像缓存
-                _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl);
-                return;
+                const removed = arr.splice(parseInt(del.dataset.del),1)[0];
+                if(removed?.url){ try{ localStorage.removeItem(_avKey(removed.url)); }catch(e){} }
+                _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return;
             }
             const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
@@ -942,6 +940,7 @@
         if(autoUrl){ document.getElementById('url').value = autoUrl; window.go(); }
         setInterval(refreshAllFollowStatus, 5*60*1000);
         refreshAllFollowStatus();
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAllFollowStatus(); });
     }
     init();
 </script>
