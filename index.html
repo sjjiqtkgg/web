@@ -45,7 +45,7 @@
         .chat-msg { display: flex; align-items: baseline; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #1e1e1e; font-size: 16px; }
         .chat-nick { color: #81C784; font-weight: 500; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .chat-nick::after { content: ":"; margin-right: 4px; color: #aaa; }
-        .chat-text { color: #ffffff; word-break: break-word; }
+        .chat-text { color: #FFFFF0; word-break: break-word; }
         .empty-chat { text-align: center; color: #555; padding: 20px; font-style: italic; }
         .follow-item, .history-item { display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; cursor: pointer; background: #141414; transition: background 0.2s; }
         .follow-item:hover, .history-item:hover { background: #222; }
@@ -440,8 +440,33 @@
         setTimeout(() => { if (toast.parentNode) { toast.style.opacity='0'; setTimeout(()=>toast.remove(),300); } }, 6000);
     }
 
+    let _followRefreshing = false; // 防止 visibilitychange 和定时器并发触发
+
+    // 跨 tab 弹幕去重：同一主播 10 分钟内只弹一次
+    const TOAST_COOLDOWN = 10 * 60 * 1000;
+    const _toastedThisSession = new Set(); // 当前 tab 会话内已弹过的 URL，防止多次轮询重复弹
+
+    function _shouldToast(url) {
+        // 同一 tab 会话内已弹过 → 直接拒绝，不依赖 localStorage 时序
+        if (_toastedThisSession.has(url)) return false;
+        const key = 'nt_' + url.replace(/\W/g, '_').slice(-40);
+        try {
+            const last = localStorage.getItem(key);
+            if (last && Date.now() - parseInt(last) < TOAST_COOLDOWN) return false;
+            localStorage.setItem(key, Date.now().toString());
+            _toastedThisSession.add(url); // 标记，防止同 tab 后续轮询重复弹
+            return true;
+        } catch {
+            _toastedThisSession.add(url);
+            return true;
+        }
+    }
+
     async function refreshAllFollowStatus() {
-        if (document.hidden) return; // 标签页在后台时跳过，避免持续打后端无效请求
+        if (document.hidden) return;
+        if (_followRefreshing) return;
+        _followRefreshing = true;
+        try {
         const items = _loadFollows();
         if (!items.length) return;
         const before = {}; items.forEach(i => before[i.url] = i.status);
@@ -491,7 +516,8 @@
         }
 
         _saveFollows(items); renderFollowList();
-        items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online') showPageToast(item.platform, item.name, item.avatar, item.url); });
+        items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
+        } finally { _followRefreshing = false; }
     }
 
     // ==================== 弹幕连接模块 ====================
