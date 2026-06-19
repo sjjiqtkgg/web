@@ -160,11 +160,8 @@
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
 
     function _avKey(roomUrl) {
-        // 简单字符串哈希（DJB2 变体），避免不同 URL 末尾相同字符导致 key 冲突
-        let h = 5381;
-        for (let i = 0; i < roomUrl.length; i++) { h = ((h << 5) + h + roomUrl.charCodeAt(i)) | 0; }
-        const safeTail = roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-30);
-        return 'av2_' + (h >>> 0).toString(36) + '_' + safeTail;
+        // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
+        return 'av2_' + roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
     }
 
     function getAvatarCache(roomUrl) {
@@ -225,8 +222,7 @@
                     // 后台刷新（不影响当前显示）
                     if (workerUrl && workerUrl !== cached) {
                         const t = new Image();
-                        t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); t.onload = t.onerror = null; };
-                        t.onerror = () => { t.onload = t.onerror = null; }; // 静默失败，不影响当前已显示的缓存头像
+                        t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
                         t.src = workerUrl;
                     }
                 },
@@ -419,14 +415,10 @@
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
-    let _followRefreshing = false; // 防止 visibilitychange 和定时器并发触发
-
     async function refreshAllFollowStatus() {
-        if (_followRefreshing) return;
-        _followRefreshing = true;
-        try {
         const items = _loadFollows();
         if (!items.length) return;
+        const before = {}; items.forEach(i => before[i.url] = i.status);
 
         const buildPayload = () => items.map(item => {
             let ck = '';
@@ -473,7 +465,6 @@
         }
 
         _saveFollows(items); renderFollowList();
-        } finally { _followRefreshing = false; }
     }
 
     // ==================== 弹幕连接模块 ====================
@@ -654,7 +645,6 @@
                     if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                     hideOfflineOverlay();
                 } else {
-                    alert(`解析失败：主播可能未开播或链接无效`);
                     currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName);
                     setBtn(false); return;
@@ -902,12 +892,7 @@
         followListDiv.addEventListener('click', e => {
             if(e.button!==0) return;
             const del = e.target.closest('[data-del]');
-            if(del){
-                const arr=_loadFollows();
-                const removed = arr.splice(parseInt(del.dataset.del),1)[0];
-                if(removed?.url){ try{ localStorage.removeItem(_avKey(removed.url)); }catch(e){} }
-                _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return;
-            }
+            if(del){ const arr=_loadFollows(); arr.splice(parseInt(del.dataset.del),1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
             const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
         followListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
@@ -922,7 +907,6 @@
         if(autoUrl){ document.getElementById('url').value = autoUrl; window.go(); }
         setInterval(refreshAllFollowStatus, 5*60*1000);
         refreshAllFollowStatus();
-        document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAllFollowStatus(); });
     }
     init();
 </script>
