@@ -59,6 +59,15 @@
         .history-time { font-size: 10px; color: #888; }
         @media (max-width: 700px) { #chat-panel { width: 260px; } .chat-nick { max-width: 70px; } }
 
+        .page-toast-container { position: fixed; top: 60px; right: 16px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+        .page-toast { position: relative; pointer-events: auto; background: #1e1e1e; border: 1px solid #f5a623; border-radius: 8px; padding: 12px 16px; color: #eee; font-size: 14px; max-width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); cursor: pointer; animation: toastIn 0.3s ease-out; display: flex; align-items: center; gap: 10px; transition: opacity 0.3s; }
+        .page-toast:hover { background: #2a2a2a; }
+        .page-toast .toast-icon { flex-shrink: 0; }
+        .page-toast .toast-body { flex: 1; padding-right: 14px; }
+        .page-toast .toast-title { font-weight: bold; color: #f5a623; }
+        .page-toast .toast-sub { font-size: 12px; color: #aaa; margin-top: 2px; }
+        .page-toast .toast-close { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; background: #3a3a3a; border: 1px solid #555; color: #ddd; font-size: 13px; line-height: 20px; text-align: center; cursor: pointer; transition: background 0.15s, transform 0.15s; }
+        .page-toast .toast-close:hover { background: #e74c3c; border-color: #e74c3c; color: #fff; transform: scale(1.1); }
         @keyframes toastIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
     </style>
 </head>
@@ -415,6 +424,45 @@
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
+    // 跨 tab 弹幕去重：同一主播 10 分钟内只弹一次
+    const TOAST_COOLDOWN = 10 * 60 * 1000;
+    const _toastedThisSession = new Set(); // 当前 tab 会话内已弹过的 URL，防止多次轮询重复弹
+
+    function _shouldToast(url) {
+        if (_toastedThisSession.has(url)) return false;
+        const key = 'nt_' + url.replace(/\W/g, '_').slice(-40);
+        try {
+            const last = localStorage.getItem(key);
+            if (last && Date.now() - parseInt(last) < TOAST_COOLDOWN) return false;
+            localStorage.setItem(key, Date.now().toString());
+            _toastedThisSession.add(url);
+            return true;
+        } catch {
+            _toastedThisSession.add(url);
+            return true;
+        }
+    }
+
+    function showPageToast(platform, name, avatar, url) {
+        const container = document.querySelector('.page-toast-container') || (()=>{const c=document.createElement('div');c.className='page-toast-container';document.body.appendChild(c);return c;})();
+        const toast = document.createElement('div');
+        toast.className = 'page-toast';
+        toast.innerHTML = `
+            <div class="toast-icon"><img src="${defaultAvatar}" data-av="${escapeHtml(avatar||'')}" data-ck="${escapeHtml(url)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer"></div>
+            <div class="toast-body"><div class="toast-title">${escapeHtml(platform||'')} ${escapeHtml(name||'主播')} 开播了！</div><div class="toast-sub">点击立即观看 →</div></div>
+            <span class="toast-close" title="关闭">✕</span>`;
+        const img = toast.querySelector('img[data-av]');
+        if (img) applyAvatar(img, img.dataset.av, img.dataset.ck);
+        const close = () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); };
+        toast.querySelector('.toast-close').onclick = (e) => { e.stopPropagation(); close(); };
+        toast.addEventListener('click', (e) => {
+            if (e.target.closest('.toast-close')) return;
+            document.getElementById('url').value = url; window.go(); toast.remove();
+        });
+        container.appendChild(toast);
+        setTimeout(() => { if (toast.parentNode) close(); }, 6000);
+    }
+
     async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
@@ -465,6 +513,7 @@
         }
 
         _saveFollows(items); renderFollowList();
+        items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
     }
 
     // ==================== 弹幕连接模块 ====================
@@ -654,7 +703,9 @@
                 if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
                     if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
                 }
-                alert(`解析失败：${e.message}`);
+                console.warn(`解析失败：${e.message}`);
+                currentAnchorName = currentAnchorName || raw.split('/').pop().split('?')[0] || '主播';
+                showOfflineOverlay(currentAnchorName);
                 setBtn(false); return;
             }
         } else if(isCDN){
