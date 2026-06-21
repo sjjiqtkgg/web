@@ -490,8 +490,9 @@
             }
             items.forEach(item => {
                 const d = byUrl[item.url];
-                if (!d) { item.status = 'error'; return; }
-                item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
+                if (!d) return; // 请求失败/无响应：保留上次已知状态，避免误判为"刚开播"
+                if (d.error) return; // 后端报错：同样保留上次状态，不当作确认结果
+                item.status = d.streams?.length ? 'online' : 'offline';
                 if (d.avatar) item.avatar = d.avatar;
             });
         } catch (e) {
@@ -503,11 +504,12 @@
                         if(item.url.includes('sooplive.com')) ck = getSoopCookie();
                         else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
                         const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
-                        if (r.status === 400) { item.status = 'offline'; return; }
+                        if (r.status === 400) { item.status = 'offline'; return; } // 后端明确返回 400 = 确认未开播
                         const d = await r.json();
-                        item.status = d.error ? 'error' : (d.streams?.length ? 'online' : 'offline');
+                        if (d.error) return; // 后端报错：保留上次已知状态
+                        item.status = d.streams?.length ? 'online' : 'offline';
                         if (d.avatar) item.avatar = d.avatar;
-                    } catch(e) { item.status = 'error'; }
+                    } catch(e) { /* 网络异常：保留上次已知状态，避免误判跳变 */ }
                 }));
             }
         }
