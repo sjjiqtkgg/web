@@ -426,21 +426,15 @@
 
     // 跨 tab 弹幕去重：同一主播 10 分钟内只弹一次
     const TOAST_COOLDOWN = 10 * 60 * 1000;
-    const _toastedThisSession = new Set(); // 当前 tab 会话内已弹过的 URL，防止多次轮询重复弹
 
     function _shouldToast(url) {
-        if (_toastedThisSession.has(url)) return false;
         const key = 'nt_' + url.replace(/\W/g, '_').slice(-40);
         try {
             const last = localStorage.getItem(key);
             if (last && Date.now() - parseInt(last) < TOAST_COOLDOWN) return false;
             localStorage.setItem(key, Date.now().toString());
-            _toastedThisSession.add(url);
             return true;
-        } catch {
-            _toastedThisSession.add(url);
-            return true;
-        }
+        } catch { return true; }
     }
 
     function showPageToast(platform, name, avatar, url) {
