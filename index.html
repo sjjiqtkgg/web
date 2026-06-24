@@ -433,11 +433,9 @@
         toast.innerHTML = `
             <div class="toast-icon"><img src="${defaultAvatar}" data-av="${escapeHtml(avatar||'')}" data-ck="${escapeHtml(url)}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;" referrerpolicy="no-referrer"></div>
             <div class="toast-body"><div class="toast-title">${escapeHtml(platform||'')} ${escapeHtml(name||'主播')} 开播了！</div><div class="toast-sub">点击立即观看 →</div></div>
-            <span class="toast-close" title="关闭">✕</span>`;
         const img = toast.querySelector('img[data-av]');
         if (img) applyAvatar(img, img.dataset.av, img.dataset.ck);
         const close = () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); };
-        toast.querySelector('.toast-close').onclick = (e) => { e.stopPropagation(); close(); };
         toast.addEventListener('click', (e) => {
             if (e.target.closest('.toast-close')) return;
             document.getElementById('url').value = url; window.go(); toast.remove();
