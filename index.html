@@ -457,10 +457,11 @@
         setTimeout(() => { if (toast.parentNode) close(); }, 6000);
     }
 
-    async function refreshAllFollowStatus() {
+    async function refreshAllFollowStatus(forceRecheck = false) {
         const items = _loadFollows();
         if (!items.length) return;
-        const before = {}; items.forEach(i => before[i.url] = i.status);
+        // forceRecheck=true 时把所有 online 当作 offline，确保切回标签页后能重新检测开播
+        const before = {}; items.forEach(i => before[i.url] = (forceRecheck && i.status === 'online') ? 'offline' : i.status);
 
         const buildPayload = () => items.map(item => {
             let ck = '';
@@ -876,6 +877,8 @@
             const video = art.video; if(!video || video.paused) return;
             if(window._hlsInst){ try{ const lp = window._hlsInst.liveSyncPosition; if(lp && Math.abs(video.currentTime-lp)>3){ video.currentTime=lp; video.play().catch(()=>{}); } } catch(e){} }
         }
+        // 切回标签页时立刻重新轮询，把所有 online 强制当 offline 对比，避免错过下播再上播的跳变
+        if(!document.hidden) refreshAllFollowStatus(true);
     });
 
     function setBtn(loading){ const btn = document.getElementById('btn-play'); if(btn){ btn.disabled=loading; btn.textContent=loading?'…':'播放'; } }
