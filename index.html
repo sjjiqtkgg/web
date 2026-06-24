@@ -424,18 +424,7 @@
 
     function playFromFollows(url) { document.getElementById('url').value = url; window.go(); }
 
-    // 跨 tab 弹幕去重：同一主播 10 分钟内只弹一次
-    const TOAST_COOLDOWN = 10 * 60 * 1000;
-
-    function _shouldToast(url) {
-        const key = 'nt_' + url.replace(/\W/g, '_').slice(-40);
-        try {
-            const last = localStorage.getItem(key);
-            if (last && Date.now() - parseInt(last) < TOAST_COOLDOWN) return false;
-            localStorage.setItem(key, Date.now().toString());
-            return true;
-        } catch { return true; }
-    }
+    function _shouldToast(url) { return true; }
 
     function showPageToast(platform, name, avatar, url) {
         const container = document.querySelector('.page-toast-container') || (()=>{const c=document.createElement('div');c.className='page-toast-container';document.body.appendChild(c);return c;})();
@@ -457,11 +446,11 @@
         setTimeout(() => { if (toast.parentNode) close(); }, 6000);
     }
 
-    async function refreshAllFollowStatus(forceRecheck = false) {
+    async function refreshAllFollowStatus() {
         const items = _loadFollows();
         if (!items.length) return;
-        // forceRecheck=true 时把所有 online 当作 offline，确保切回标签页后能重新检测开播
-        const before = {}; items.forEach(i => before[i.url] = (forceRecheck && i.status === 'online') ? 'offline' : i.status);
+        // 使用 localStorage 中保存的上一次真实状态作为 before
+        const before = {}; items.forEach(i => before[i.url] = i.status);
 
         const buildPayload = () => items.map(item => {
             let ck = '';
@@ -510,6 +499,7 @@
         }
 
         _saveFollows(items); renderFollowList();
+        // 只有真正从离线/未知变为在线的主播才弹窗
         items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
     }
 
@@ -877,8 +867,8 @@
             const video = art.video; if(!video || video.paused) return;
             if(window._hlsInst){ try{ const lp = window._hlsInst.liveSyncPosition; if(lp && Math.abs(video.currentTime-lp)>3){ video.currentTime=lp; video.play().catch(()=>{}); } } catch(e){} }
         }
-        // 切回标签页时立刻重新轮询，把所有 online 强制当 offline 对比，避免错过下播再上播的跳变
-        if(!document.hidden) refreshAllFollowStatus(true);
+        // 切回标签页时立即轮询一次，确保拿到最新状态，但不人为制造跳变
+        if(!document.hidden) refreshAllFollowStatus();
     });
 
     function setBtn(loading){ const btn = document.getElementById('btn-play'); if(btn){ btn.disabled=loading; btn.textContent=loading?'…':'播放'; } }
