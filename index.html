@@ -867,8 +867,6 @@
             const video = art.video; if(!video || video.paused) return;
             if(window._hlsInst){ try{ const lp = window._hlsInst.liveSyncPosition; if(lp && Math.abs(video.currentTime-lp)>3){ video.currentTime=lp; video.play().catch(()=>{}); } } catch(e){} }
         }
-        // 切回标签页时立即轮询一次，确保拿到最新状态，但不人为制造跳变
-        if(!document.hidden) refreshAllFollowStatus();
     });
 
     function setBtn(loading){ const btn = document.getElementById('btn-play'); if(btn){ btn.disabled=loading; btn.textContent=loading?'…':'播放'; } }
@@ -945,7 +943,7 @@
         document.getElementById('url').addEventListener('keypress', e => { if(e.key==='Enter') window.go(); });
         const autoUrl = new URLSearchParams(location.search).get('url');
         if(autoUrl){ document.getElementById('url').value = autoUrl; window.go(); }
-        setInterval(refreshAllFollowStatus, 5*60*1000);
+        setInterval(refreshAllFollowStatus, 10*60*1000);
         refreshAllFollowStatus();
     }
     init();
