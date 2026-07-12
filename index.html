@@ -165,8 +165,6 @@
 
     // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
-    // 【修复】头像缓存最多保留 200 条，超限时删除最旧的，防止 localStorage 5MB 配额耗尽
-    const AVATAR_CACHE_MAX = 200;
 
     function _avKey(roomUrl) {
         // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
@@ -185,20 +183,7 @@
 
     function setAvatarCache(roomUrl, finalUrl) {
         if (!roomUrl || !finalUrl || finalUrl === defaultAvatar) return;
-        try {
-            // 【修复】写入前检查 av2_ 前缀 key 的总数，超限则按写入时间淘汰最旧的
-            const key = _avKey(roomUrl);
-            const allAvKeys = Object.keys(localStorage).filter(k => k.startsWith('av2_'));
-            if (allAvKeys.length >= AVATAR_CACHE_MAX && !allAvKeys.includes(key)) {
-                // 按存储值中的时间戳 t 排序，删除最旧的 1/4
-                const withTs = allAvKeys.map(k => {
-                    try { return { k, t: JSON.parse(localStorage.getItem(k)).t || 0 }; }
-                    catch { return { k, t: 0 }; }
-                }).sort((a, b) => a.t - b.t);
-                withTs.slice(0, Math.ceil(AVATAR_CACHE_MAX / 4)).forEach(({ k }) => localStorage.removeItem(k));
-            }
-            localStorage.setItem(key, JSON.stringify({ u: finalUrl, t: Date.now() }));
-        } catch {}
+        try { localStorage.setItem(_avKey(roomUrl), JSON.stringify({ u: finalUrl, t: Date.now() })); } catch {}
     }
 
     /**
@@ -439,10 +424,6 @@
 
     function _shouldToast(url) { return true; }
 
-    // 【修复】防重入锁：setInterval 不等待 async 函数完成，网络慢时会有两个实例并发执行
-    // 导致 _saveFollows 互相覆盖，出现状态撕裂。加锁确保同一时刻只有一个实例运行。
-    let _followRefreshing = false;
-
     function showPageToast(platform, name, avatar, url) {
         const container = document.querySelector('.page-toast-container') || (()=>{const c=document.createElement('div');c.className='page-toast-container';document.body.appendChild(c);return c;})();
         const toast = document.createElement('div');
@@ -461,12 +442,8 @@
     }
 
     async function refreshAllFollowStatus() {
-        // 【修复】防重入：上一轮还未完成时直接跳过，避免并发状态撕裂
-        if (_followRefreshing) return;
-        _followRefreshing = true;
-        try {
         const items = _loadFollows();
-        if (!items.length) return;  // finally 会统一释放锁，无需手动置 false
+        if (!items.length) return;
         // 使用 localStorage 中保存的上一次真实状态作为 before
         const before = {}; items.forEach(i => before[i.url] = i.status);
 
@@ -519,10 +496,6 @@
         _saveFollows(items); renderFollowList();
         // 只有真正从离线/未知变为在线的主播才弹窗
         items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
-        } finally {
-            // 【修复】无论成功还是异常，都要释放锁
-            _followRefreshing = false;
-        }
     }
 
     // ==================== 弹幕连接模块 ====================
@@ -608,7 +581,7 @@
         const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName);
         twitchWs=ws;
         ws.onopen = () => { twitchConnecting=false; addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); };
-        ws.onmessage = e => { if(e.data==='pong') return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
+        ws.onmessage = e => { if(typeof e.data==='string'&&e.data.includes('pong')) return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
         ws.onerror = () => { twitchConnecting=false; };
         ws.onclose = () => { twitchConnecting=false; clearInterval(ws._hb); if(twitchWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('twitch.tv')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startTwitchDanmaku(channelName); },3000); };
     }
