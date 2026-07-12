@@ -466,7 +466,7 @@
         _followRefreshing = true;
         try {
         const items = _loadFollows();
-        if (!items.length) { _followRefreshing = false; return; }
+        if (!items.length) return;  // finally 会统一释放锁，无需手动置 false
         // 使用 localStorage 中保存的上一次真实状态作为 before
         const before = {}; items.forEach(i => before[i.url] = i.status);
 
