@@ -608,7 +608,7 @@
         const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName);
         twitchWs=ws;
         ws.onopen = () => { twitchConnecting=false; addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); };
-        ws.onmessage = e => { if(typeof e.data==='string'&&e.data.includes('pong')) return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
+        ws.onmessage = e => { if(e.data==='pong') return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
         ws.onerror = () => { twitchConnecting=false; };
         ws.onclose = () => { twitchConnecting=false; clearInterval(ws._hb); if(twitchWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('twitch.tv')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startTwitchDanmaku(channelName); },3000); };
     }
