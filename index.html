@@ -667,7 +667,9 @@
         _currentFetchAbort = abortCtrl;
 
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
-        lastRoomUrl = isCDN ? '' : raw;
+        // 【F-03修复】直链播放也保留 lastRoomUrl，使卡顿/错误时 guardedReconnect 能正常重连，
+        // 而不是因 lastRoomUrl 为空而放弃重试，导致用户只能手动刷新。
+        lastRoomUrl = raw;
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
