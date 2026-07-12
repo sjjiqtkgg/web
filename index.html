@@ -928,7 +928,11 @@
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl; if(!url) return;
         const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
-        if(idx>=0) follows.splice(idx,1);
+        if(idx>=0) {
+            follows.splice(idx,1);
+            // 取关时主动清理头像缓存，避免废弃条目长期占用 localStorage 配额
+            try { localStorage.removeItem(_avKey(url)); } catch(e) {}
+        }
         else {
             let name=currentAnchorName, platform=currentPlatform, avatar=currentAvatar;
             if(!name||['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'].includes(name)){
@@ -952,7 +956,7 @@
         followListDiv.addEventListener('click', e => {
             if(e.button!==0) return;
             const del = e.target.closest('[data-del]');
-            if(del){ const arr=_loadFollows(); arr.splice(parseInt(del.dataset.del),1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
+            if(del){ const arr=_loadFollows(); const removed=arr.splice(parseInt(del.dataset.del),1); if(removed[0]?.url){ try{ localStorage.removeItem(_avKey(removed[0].url)); }catch(e){} } _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
             const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
         followListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
