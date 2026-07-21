@@ -67,31 +67,6 @@
         .page-toast .toast-title { font-weight: bold; color: #f5a623; }
         .page-toast .toast-sub { font-size: 12px; color: #aaa; margin-top: 2px; }
         @keyframes toastIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-
-        /* 播放器内刷新按钮样式 */
-        #player-refresh {
-            position: absolute;
-            bottom: 16px;
-            right: 16px;
-            z-index: 9999;
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: rgba(0,0,0,0.5);
-            border: 1px solid rgba(255,255,255,0.3);
-            color: #fff;
-            font-size: 18px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background 0.2s;
-            backdrop-filter: blur(4px);
-        }
-        #player-refresh:hover {
-            background: rgba(245,166,35,0.7);
-            border-color: #f5a623;
-        }
     </style>
 </head>
 <body>
@@ -114,8 +89,6 @@
             <div class="offline-sub" id="offline-sub">直播已结束</div>
             <button class="offline-retry" onclick="hideOfflineOverlay(); if(lastRoomUrl) goWithUrl(lastRoomUrl);">🔄 重新检测</button>
         </div>
-        <!-- 播放器内刷新按钮 -->
-        <button id="player-refresh" onclick="window.refreshPlayer()" title="刷新直播">🔄</button>
     </div>
     <div id="chat-panel">
         <div class="chat-header">
@@ -192,9 +165,11 @@
 
     // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
+    // 【修复】头像缓存最多保留 200 条，超限时删除最旧的，防止 localStorage 5MB 配额耗尽
     const AVATAR_CACHE_MAX = 200;
 
     function _avKey(roomUrl) {
+        // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
         return 'av2_' + roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
     }
 
@@ -211,9 +186,11 @@
     function setAvatarCache(roomUrl, finalUrl) {
         if (!roomUrl || !finalUrl || finalUrl === defaultAvatar) return;
         try {
+            // 【修复】写入前检查 av2_ 前缀 key 的总数，超限则按写入时间淘汰最旧的
             const key = _avKey(roomUrl);
             const allAvKeys = Object.keys(localStorage).filter(k => k.startsWith('av2_'));
             if (allAvKeys.length >= AVATAR_CACHE_MAX && !allAvKeys.includes(key)) {
+                // 按存储值中的时间戳 t 排序，删除最旧的 1/4
                 const withTs = allAvKeys.map(k => {
                     try { return { k, t: JSON.parse(localStorage.getItem(k)).t || 0 }; }
                     catch { return { k, t: 0 }; }
@@ -224,9 +201,18 @@
         } catch {}
     }
 
+    /**
+     * 为 <img> 元素加载头像，支持本地缓存（stale-while-revalidate）
+     * 策略：本地缓存 → Worker代理 → 原始直链 → 默认头像
+     * 任何一环成功加载后，立即写入缓存供下次离线使用。
+     *
+     * @param {HTMLImageElement} img        目标 <img> 元素
+     * @param {string} originalUrl          后端返回的原始头像 URL
+     * @param {string} cacheKey             唯一标识，通常是直播间 URL
+     */
     function applyAvatar(img, originalUrl, cacheKey) {
         if (!img) return;
-        const workerUrl = getFinalAvatarUrl(originalUrl);
+        const workerUrl = getFinalAvatarUrl(originalUrl); // Worker代理URL 或 直链
         const cached = cacheKey ? getAvatarCache(cacheKey) : null;
 
         function tryLoad(src, onOk, onFail) {
@@ -237,6 +223,7 @@
         }
 
         function fallbackChain() {
+            // 链：workerUrl → originalUrl（直连兜底）→ defaultAvatar
             tryLoad(workerUrl,
                 (src) => { if (cacheKey) setAvatarCache(cacheKey, src); },
                 () => {
@@ -251,21 +238,24 @@
         }
 
         if (cached) {
+            // 本地有缓存：立即显示，后台静默刷新
             tryLoad(cached,
                 () => {
+                    // 后台刷新（不影响当前显示）
                     if (workerUrl && workerUrl !== cached) {
                         const t = new Image();
                         t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
                         t.src = workerUrl;
                     }
                 },
-                () => fallbackChain()
+                () => fallbackChain()  // 缓存URL失效则走正常链
             );
         } else {
             fallbackChain();
         }
     }
 
+    // 平台 favicon 映射表（指向官方 favicon.ico）
     const PLATFORM_FAVICON_MAP = {
         '虎牙': 'https://www.huya.com/favicon.ico',
         '斗鱼': 'https://www.douyu.com/favicon.ico',
@@ -274,7 +264,7 @@
         'Twitch': 'https://www.twitch.tv/favicon.ico',
         'PandaTV': 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#FFCC00"/><text x="50" y="72" text-anchor="middle" fill="white" font-size="55" font-family="Arial">🐼</text></svg>'),
         'SOOP': 'https://play.sooplive.com/favicon.ico',
-        '直链': null,
+        '直链': null,    // 使用默认图标
         '未知': null
     };
 
@@ -294,6 +284,7 @@
             return;
         }
 
+        // 尝试加载平台真实 favicon，失败则回退到默认图标
         link.href = iconUrl;
         link.onerror = function() {
             link.href = defaultIcon;
@@ -432,6 +423,7 @@
                 <span class="follow-status ${x.status}">${x.status === 'online' ? '直播中' : '未开播'}</span>
                 <span class="follow-delete" data-del="${i}">✕</span>
             </div>`).join('');
+        // 头像缓存加载（data-av / data-ck → applyAvatar）
         followListDiv.querySelectorAll('img.follow-avatar').forEach(img => {
             applyAvatar(img, img.dataset.av, img.dataset.ck);
         });
@@ -447,6 +439,8 @@
 
     function _shouldToast(url) { return true; }
 
+    // 【修复】防重入锁：setInterval 不等待 async 函数完成，网络慢时会有两个实例并发执行
+    // 导致 _saveFollows 互相覆盖，出现状态撕裂。加锁确保同一时刻只有一个实例运行。
     let _followRefreshing = false;
 
     function showPageToast(platform, name, avatar, url) {
@@ -467,11 +461,13 @@
     }
 
     async function refreshAllFollowStatus() {
+        // 【修复】防重入：上一轮还未完成时直接跳过，避免并发状态撕裂
         if (_followRefreshing) return;
         _followRefreshing = true;
         try {
         const items = _loadFollows();
-        if (!items.length) return;
+        if (!items.length) return;  // finally 会统一释放锁，无需手动置 false
+        // 使用 localStorage 中保存的上一次真实状态作为 before
         const before = {}; items.forEach(i => before[i.url] = i.status);
 
         const buildPayload = () => items.map(item => {
@@ -496,12 +492,13 @@
             }
             items.forEach(item => {
                 const d = byUrl[item.url];
-                if (!d) return;
-                if (d.error) return;
+                if (!d) return; // 请求失败/无响应：保留上次已知状态，避免误判为"刚开播"
+                if (d.error) return; // 后端报错：同样保留上次状态，不当作确认结果
                 item.status = d.streams?.length ? 'online' : 'offline';
                 if (d.avatar) item.avatar = d.avatar;
             });
         } catch (e) {
+            // 批量接口不可用时（如未部署/网络问题），回退到逐条请求，分批避免一次性打满
             for (let i = 0; i < items.length; i += 3) {
                 await Promise.all(items.slice(i, i+3).map(async item => {
                     try {
@@ -509,19 +506,21 @@
                         if(item.url.includes('sooplive.com')) ck = getSoopCookie();
                         else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
                         const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
-                        if (r.status === 400) { item.status = 'offline'; return; }
+                        if (r.status === 400) { item.status = 'offline'; return; } // 后端明确返回 400 = 确认未开播
                         const d = await r.json();
-                        if (d.error) return;
+                        if (d.error) return; // 后端报错：保留上次已知状态
                         item.status = d.streams?.length ? 'online' : 'offline';
                         if (d.avatar) item.avatar = d.avatar;
-                    } catch(e) { }
+                    } catch(e) { /* 网络异常：保留上次已知状态，避免误判跳变 */ }
                 }));
             }
         }
 
         _saveFollows(items); renderFollowList();
+        // 只有真正从离线/未知变为在线的主播才弹窗
         items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
         } finally {
+            // 【修复】无论成功还是异常，都要释放锁
             _followRefreshing = false;
         }
     }
@@ -541,6 +540,7 @@
         ws.onerror = () => { douyuConnecting=false; clearInterval(ws._hb); };
     }
 
+    // 虎牙 Tars 解析
     function tarsReader(ab) {
         const buf = ab instanceof Uint8Array ? ab : new Uint8Array(ab); let pos = 0;
         function rH() { if(pos>=buf.length) return null; let b=buf[pos++], t=(b>>4)&0xF, y=b&0xF; if(t===15){ if(pos>=buf.length) return null; t=buf[pos++]; } return {tag:t,type:y}; }
@@ -644,10 +644,12 @@
     let _lastReconnectAt = 0;
     const RECONNECT_COOLDOWN_MS = 6000;
 
+    // 自动重连专用入口：stall/ended/error/hls 等所有"自动触发"的重连都应走这里。
+    // 用户主动点击播放（goWithUrl 直接调用）不受此限制。
     function guardedReconnect(url, delayMs) {
         if(!url) return;
         const now = Date.now();
-        if(now - _lastReconnectAt < RECONNECT_COOLDOWN_MS) return;
+        if(now - _lastReconnectAt < RECONNECT_COOLDOWN_MS) return; // 冷却中，丢弃本次自动重连
         _lastReconnectAt = now;
         setTimeout(() => { if(lastRoomUrl) goWithUrl(url); }, delayMs || 0);
     }
@@ -659,11 +661,14 @@
         setBtn(true);
         if(chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
 
+        // 取消上一次尚未完成的解析请求，避免快速切台时旧响应覆盖新状态
         if(_currentFetchAbort){ try{ _currentFetchAbort.abort(); }catch(e){} }
         const abortCtrl = new AbortController();
         _currentFetchAbort = abortCtrl;
 
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
+        // 【F-03修复】直链播放也保留 lastRoomUrl，使卡顿/错误时 guardedReconnect 能正常重连，
+        // 而不是因 lastRoomUrl 为空而放弃重试，导致用户只能手动刷新。
         lastRoomUrl = raw;
         currentPlatform = getPlatformName(raw);
         let streams = null;
@@ -674,12 +679,13 @@
                 if(raw.includes('sooplive.com')) ck = getSoopCookie();
                 else if(raw.includes('twitch.tv')) ck = getTwitchCookie();
                 const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`+(ck?`&cookie=${encodeURIComponent(ck)}`:''), { signal: abortCtrl.signal });
-                if(_currentFetchAbort !== abortCtrl) return;
+                if(_currentFetchAbort !== abortCtrl) return; // 已被更新的请求取代，丢弃本次结果
                 if(resp.status === 429) throw new Error('请求过于频繁，请稍后再试');
                 if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
                 if(_currentFetchAbort !== abortCtrl) return;
                 if(data.error){
+                    // SOOP 19+ 限制：不显示"未开播"蒙层，引导用户去设置页填 Cookie
                     if(raw.includes('sooplive.com') && (data.error.includes('19+') || data.error.includes('Cookie'))){
                         currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
                         if(confirm(`${data.error}\n\n是否现在前往设置页填写 SOOP Cookie？`)){
@@ -704,7 +710,7 @@
                     setBtn(false); return;
                 }
             } catch(e){
-                if(e.name === 'AbortError') return;
+                if(e.name === 'AbortError') return; // 被新请求取代，静默退出
                 if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
                     if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
                 }
@@ -726,12 +732,14 @@
     }
 
     function playStream(streams) {
+        // 1. 先拿旧 video 引用，在 Artplayer 销毁（会移除/替换 <video>）之前清理底层播放器实例与定时器，
+        //    避免旧实例的回调在分离的 DOM 节点上继续触发，误判卡顿并对新地址反复重连。
         const oldVideo = document.querySelector('#player video');
         if(oldVideo){
             if(oldVideo._stallTimer){ clearInterval(oldVideo._stallTimer); oldVideo._stallTimer=null; }
             if(oldVideo._hlsStallTimer){ clearInterval(oldVideo._hlsStallTimer); oldVideo._hlsStallTimer=null; }
             if(oldVideo._adWaitTimer){ clearTimeout(oldVideo._adWaitTimer); oldVideo._adWaitTimer=null; }
-            oldVideo._playerId = -1; oldVideo._hlsId = -1;
+            oldVideo._playerId = -1; oldVideo._hlsId = -1; // 使旧回调里的 id 比对必然失败
             if(oldVideo._mpegts){
                 const _old=oldVideo._mpegts; oldVideo._mpegts=null;
                 try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){}
@@ -739,6 +747,7 @@
         }
         if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
 
+        // 2. 现在再安全销毁 Artplayer
         if(art){
             try{
                 if(art.video){ art.video.pause(); if(art.video.srcObject) art.video.srcObject=null; art.video.removeAttribute('src'); }
@@ -770,7 +779,7 @@
                         try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){}
                     }
                     video._playerIdCounter = (video._playerIdCounter||0)+1;
-                    const playerId = video._playerIdCounter;
+                    const playerId = video._playerIdCounter;   // 【修复 playerId 未定义】
                     video._playerId = playerId;
 
                     const player = mpegts.createPlayer({ type:'flv', url:url, isLive:true }, {
@@ -784,6 +793,7 @@
                     let lastTime=-1, stallCount=0;
                     video._stallTimer = setInterval(() => {
                         if(video._playerId!==playerId||!art||!video){ clearInterval(video._stallTimer); video._stallTimer=null; return; }
+                        // 后台标签页的计时器会被浏览器节流/批量触发，currentTime 短时间不变属正常现象，不计入卡顿
                         if(document.hidden || video.readyState < 2){ lastTime = video.currentTime; stallCount = 0; return; }
                         const ct = video.currentTime;
                         if(ct===lastTime && !video.paused && !video.ended){
@@ -922,6 +932,7 @@
         const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
         if(idx>=0) {
             follows.splice(idx,1);
+            // 取关时主动清理头像缓存，避免废弃条目长期占用 localStorage 配额
             try { localStorage.removeItem(_avKey(url)); } catch(e) {}
         }
         else {
@@ -936,19 +947,6 @@
         _saveFollows(follows); updateFollowBtn(url); renderFollowList();
     };
     window.openOriginalUrl = () => { if(lastRoomUrl) window.open(lastRoomUrl, '_blank'); };
-
-    // ➕ 新增：播放器刷新函数
-    window.refreshPlayer = function () {
-        if (!lastRoomUrl) {
-            alert('暂无正在播放的直播，无法刷新');
-            return;
-        }
-        if (window._reParseLock) {
-            setTimeout(() => window.goWithUrl(lastRoomUrl), 100);
-        } else {
-            window.goWithUrl(lastRoomUrl);
-        }
-    };
 
     function init(){
         chatMessagesDiv = document.getElementById('chat-messages');
