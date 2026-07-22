@@ -560,8 +560,8 @@
         const v = r.readBytes(1); if(!v||!v.length) return;
         const r2 = tarsReader(v); r2.readInt(0);
         const msgType = r2.readInt(1);
-        // 1400=普通弹幕, 1401=贵族/VIP弹幕（两者结构相同，人数少的房间1401占比高，原来漏掉导致弹幕不全）
-        if(msgType!==1400 && msgType!==1401) return;
+        // 1400=普通弹幕, 1401=贵族/VIP弹幕, 1402=高亮/颜色弹幕（结构相同，统一处理）
+        if(msgType!==1400 && msgType!==1401 && msgType!==1402) return;
         const m = r2.readBytes(2); let nick = r2.readString(4)||'虎牙网友';
         if(!m||!m.length) return;
         const r3 = tarsReader(m);
