@@ -141,7 +141,7 @@
 
 <script>
     // ==================== 配置 ====================
-    const WORKER_BASE = "https://sfkjwjfqqf55.us.ci"; // 你的 Worker 域名
+    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 你的 Worker 域名
     const API_BASE = 'https://live1-cxe9.onrender.com'; // 你的后端域名
     const CF_WORKER = WORKER_BASE;
 
@@ -667,9 +667,7 @@
         _currentFetchAbort = abortCtrl;
 
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
-        // 【F-03修复】直链播放也保留 lastRoomUrl，使卡顿/错误时 guardedReconnect 能正常重连，
-        // 而不是因 lastRoomUrl 为空而放弃重试，导致用户只能手动刷新。
-        lastRoomUrl = raw;
+        lastRoomUrl = isCDN ? '' : raw;
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
@@ -771,6 +769,16 @@
             container:'#player', url:getProxyUrl(sDefault.url), type:artType, isLive:true, autoplay:true,
             muted:savedMuted, volume:savedVolume, setting:false, pip:true, screenshot:false,
             playbackRate:false, aspectRatio:false, fullscreenWeb:true, lang:'zh-cn', quality:qualityList,
+            controls: [
+                {
+                    position: 'right',
+                    html: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>',
+                    tooltip: '刷新直播源',
+                    click: function() {
+                        if(lastRoomUrl) guardedReconnect(lastRoomUrl, 0);
+                    }
+                }
+            ],
             customType: {
                 flv: function(video, url) {
                     if(video._stallTimer){ clearInterval(video._stallTimer); video._stallTimer=null; }
