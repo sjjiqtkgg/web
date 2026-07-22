@@ -141,7 +141,7 @@
 
 <script>
     // ==================== 配置 ====================
-    const WORKER_BASE = "https://aged-water-fc43.byronfuller5566.workers.dev"; // 你的 Worker 域名
+    const WORKER_BASE = "https://sfkjwjfqqf55.us.ci"; // 你的 Worker 域名
     const API_BASE = 'https://live1-cxe9.onrender.com'; // 你的后端域名
     const CF_WORKER = WORKER_BASE;
 
@@ -558,10 +558,7 @@
     function parseHuyaMsg(data) {
         const r = tarsReader(data.buffer||data); if(r.readInt(0)!==7) return;
         const v = r.readBytes(1); if(!v||!v.length) return;
-        const r2 = tarsReader(v); r2.readInt(0);
-        const msgType = r2.readInt(1);
-        // 1400=普通弹幕, 1401=贵族/VIP弹幕, 1402=高亮/颜色弹幕（结构相同，统一处理）
-        if(msgType!==1400 && msgType!==1401 && msgType!==1402) return;
+        const r2 = tarsReader(v); r2.readInt(0); if(r2.readInt(1)!==1400) return;
         const m = r2.readBytes(2); let nick = r2.readString(4)||'虎牙网友';
         if(!m||!m.length) return;
         const r3 = tarsReader(m);
@@ -670,7 +667,9 @@
         _currentFetchAbort = abortCtrl;
 
         const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
-        lastRoomUrl = isCDN ? '' : raw;
+        // 【F-03修复】直链播放也保留 lastRoomUrl，使卡顿/错误时 guardedReconnect 能正常重连，
+        // 而不是因 lastRoomUrl 为空而放弃重试，导致用户只能手动刷新。
+        lastRoomUrl = raw;
         currentPlatform = getPlatformName(raw);
         let streams = null;
 
@@ -772,16 +771,6 @@
             container:'#player', url:getProxyUrl(sDefault.url), type:artType, isLive:true, autoplay:true,
             muted:savedMuted, volume:savedVolume, setting:false, pip:true, screenshot:false,
             playbackRate:false, aspectRatio:false, fullscreenWeb:true, lang:'zh-cn', quality:qualityList,
-            controls: [
-                {
-                    position: 'right',
-                    html: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="white" style="display:block"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>',
-                    tooltip: '刷新直播源',
-                    click: function() {
-                        if(lastRoomUrl) guardedReconnect(lastRoomUrl, 0);
-                    }
-                }
-            ],
             customType: {
                 flv: function(video, url) {
                     if(video._stallTimer){ clearInterval(video._stallTimer); video._stallTimer=null; }
