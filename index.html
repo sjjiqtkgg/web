@@ -165,9 +165,9 @@
 
     // ── 头像本地缓存（stale-while-revalidate，1 年 TTL）─────────────────
     const AVATAR_CACHE_TTL = 365 * 24 * 3600 * 1000;
+    const AVATAR_CACHE_MAX = 200;  // 【F-13修复】头像缓存容量上限
 
     function _avKey(roomUrl) {
-        // 用直播间 URL 末尾 50 字符做存储键，避免 localStorage key 过长
         return 'av2_' + roomUrl.replace(/[^a-zA-Z0-9]/g, '_').slice(-50);
     }
 
@@ -183,21 +183,30 @@
 
     function setAvatarCache(roomUrl, finalUrl) {
         if (!roomUrl || !finalUrl || finalUrl === defaultAvatar) return;
-        try { localStorage.setItem(_avKey(roomUrl), JSON.stringify({ u: finalUrl, t: Date.now() })); } catch {}
+        try {
+            const key = _avKey(roomUrl);
+            const existed = !!localStorage.getItem(key);
+            localStorage.setItem(key, JSON.stringify({ u: finalUrl, t: Date.now() }));
+            // 【F-13修复】容量控制：仅在新写入条目时检查，超限后淘汰最旧的 25%
+            if (!existed) {
+                const allKeys = Object.keys(localStorage).filter(k => k.startsWith('av2_'));
+                if (allKeys.length > AVATAR_CACHE_MAX) {
+                    const entries = allKeys.map(k => {
+                        try { const v = JSON.parse(localStorage.getItem(k)); return { k, t: v.t || 0 }; } catch { return { k, t: 0 }; }
+                    }).sort((a,b) => a.t - b.t);
+                    const toDelete = entries.slice(0, Math.ceil(allKeys.length * 0.25));
+                    toDelete.forEach(e => localStorage.removeItem(e.k));
+                }
+            }
+        } catch {}
     }
 
     /**
      * 为 <img> 元素加载头像，支持本地缓存（stale-while-revalidate）
-     * 策略：本地缓存 → Worker代理 → 原始直链 → 默认头像
-     * 任何一环成功加载后，立即写入缓存供下次离线使用。
-     *
-     * @param {HTMLImageElement} img        目标 <img> 元素
-     * @param {string} originalUrl          后端返回的原始头像 URL
-     * @param {string} cacheKey             唯一标识，通常是直播间 URL
      */
     function applyAvatar(img, originalUrl, cacheKey) {
         if (!img) return;
-        const workerUrl = getFinalAvatarUrl(originalUrl); // Worker代理URL 或 直链
+        const workerUrl = getFinalAvatarUrl(originalUrl);
         const cached = cacheKey ? getAvatarCache(cacheKey) : null;
 
         function tryLoad(src, onOk, onFail) {
@@ -208,7 +217,6 @@
         }
 
         function fallbackChain() {
-            // 链：workerUrl → originalUrl（直连兜底）→ defaultAvatar
             tryLoad(workerUrl,
                 (src) => { if (cacheKey) setAvatarCache(cacheKey, src); },
                 () => {
@@ -223,24 +231,22 @@
         }
 
         if (cached) {
-            // 本地有缓存：立即显示，后台静默刷新
             tryLoad(cached,
                 () => {
-                    // 后台刷新（不影响当前显示）
                     if (workerUrl && workerUrl !== cached) {
                         const t = new Image();
                         t.onload = () => { if (cacheKey) setAvatarCache(cacheKey, workerUrl); };
                         t.src = workerUrl;
                     }
                 },
-                () => fallbackChain()  // 缓存URL失效则走正常链
+                () => fallbackChain()
             );
         } else {
             fallbackChain();
         }
     }
 
-    // 平台 favicon 映射表（指向官方 favicon.ico）
+    // 平台 favicon 映射表
     const PLATFORM_FAVICON_MAP = {
         '虎牙': 'https://www.huya.com/favicon.ico',
         '斗鱼': 'https://www.douyu.com/favicon.ico',
@@ -249,32 +255,22 @@
         'Twitch': 'https://www.twitch.tv/favicon.ico',
         'PandaTV': 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="45" fill="#FFCC00"/><text x="50" y="72" text-anchor="middle" fill="white" font-size="55" font-family="Arial">🐼</text></svg>'),
         'SOOP': 'https://play.sooplive.com/favicon.ico',
-        '直链': null,    // 使用默认图标
+        '直链': null,
         '未知': null
     };
 
     function updateFaviconByPlatform(platform) {
         const iconUrl = PLATFORM_FAVICON_MAP[platform];
         const defaultIcon = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="40" fill="%23333"/%3E%3Ctext x="50" y="55" text-anchor="middle" fill="%23666" font-size="40"%3E📺%3C/text%3E%3C/svg%3E';
-
         let link = document.querySelector("link[rel*='icon']");
         if (!link) {
             link = document.createElement('link');
             link.rel = 'icon';
             document.head.appendChild(link);
         }
-
-        if (!iconUrl) {
-            link.href = defaultIcon;
-            return;
-        }
-
-        // 尝试加载平台真实 favicon，失败则回退到默认图标
+        if (!iconUrl) { link.href = defaultIcon; return; }
         link.href = iconUrl;
-        link.onerror = function() {
-            link.href = defaultIcon;
-            link.onerror = null;
-        };
+        link.onerror = function() { link.href = defaultIcon; link.onerror = null; };
     }
 
     window.addEventListener('error', e => { if (e.message && e.message.includes('SourceBuffer has been removed')) { e.preventDefault(); e.stopPropagation(); } }, true);
@@ -289,7 +285,6 @@
     const CHAT_MAX = 300;
     let chatMessagesDiv = null, followListDiv = null, historyListDiv = null, sortable = null;
     const HISTORY_MAX = 100;
-    window._reParseLock = false;
 
     // ==================== 本地存储 ====================
     function _loadFollows() { try { return JSON.parse(localStorage.getItem('ps_follows') || '[]'); } catch(e) { return []; } }
@@ -408,7 +403,6 @@
                 <span class="follow-status ${x.status}">${x.status === 'online' ? '直播中' : '未开播'}</span>
                 <span class="follow-delete" data-del="${i}">✕</span>
             </div>`).join('');
-        // 头像缓存加载（data-av / data-ck → applyAvatar）
         followListDiv.querySelectorAll('img.follow-avatar').forEach(img => {
             applyAvatar(img, img.dataset.av, img.dataset.ck);
         });
@@ -441,61 +435,66 @@
         setTimeout(() => { if (toast.parentNode) close(); }, 6000);
     }
 
+    // 【F-14修复】关注刷新防重入锁
+    let _followRefreshing = false;
+
     async function refreshAllFollowStatus() {
-        const items = _loadFollows();
-        if (!items.length) return;
-        // 使用 localStorage 中保存的上一次真实状态作为 before
-        const before = {}; items.forEach(i => before[i.url] = i.status);
-
-        const buildPayload = () => items.map(item => {
-            let ck = '';
-            if(item.url.includes('sooplive.com')) ck = getSoopCookie();
-            else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
-            return { url: item.url, cookie: ck };
-        });
-
+        if (_followRefreshing) return;
+        _followRefreshing = true;
         try {
-            const payload = buildPayload();
-            const byUrl = {};
-            for (let i = 0; i < payload.length; i += 30) {
-                const r = await fetch(`${API_BASE}/api/follows/batch`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ items: payload.slice(i, i+30) })
-                });
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                const data = await r.json();
-                (data.results || []).forEach(res => { byUrl[res.url] = res; });
-            }
-            items.forEach(item => {
-                const d = byUrl[item.url];
-                if (!d) return; // 请求失败/无响应：保留上次已知状态，避免误判为"刚开播"
-                if (d.error) return; // 后端报错：同样保留上次状态，不当作确认结果
-                item.status = d.streams?.length ? 'online' : 'offline';
-                if (d.avatar) item.avatar = d.avatar;
-            });
-        } catch (e) {
-            // 批量接口不可用时（如未部署/网络问题），回退到逐条请求，分批避免一次性打满
-            for (let i = 0; i < items.length; i += 3) {
-                await Promise.all(items.slice(i, i+3).map(async item => {
-                    try {
-                        let ck = '';
-                        if(item.url.includes('sooplive.com')) ck = getSoopCookie();
-                        else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
-                        const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
-                        if (r.status === 400) { item.status = 'offline'; return; } // 后端明确返回 400 = 确认未开播
-                        const d = await r.json();
-                        if (d.error) return; // 后端报错：保留上次已知状态
-                        item.status = d.streams?.length ? 'online' : 'offline';
-                        if (d.avatar) item.avatar = d.avatar;
-                    } catch(e) { /* 网络异常：保留上次已知状态，避免误判跳变 */ }
-                }));
-            }
-        }
+            const items = _loadFollows();
+            if (!items.length) return;
+            const before = {}; items.forEach(i => before[i.url] = i.status);
 
-        _saveFollows(items); renderFollowList();
-        // 只有真正从离线/未知变为在线的主播才弹窗
-        items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
+            const buildPayload = () => items.map(item => {
+                let ck = '';
+                if(item.url.includes('sooplive.com')) ck = getSoopCookie();
+                else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
+                return { url: item.url, cookie: ck };
+            });
+
+            try {
+                const payload = buildPayload();
+                const byUrl = {};
+                for (let i = 0; i < payload.length; i += 30) {
+                    const r = await fetch(`${API_BASE}/api/follows/batch`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ items: payload.slice(i, i+30) })
+                    });
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const data = await r.json();
+                    (data.results || []).forEach(res => { byUrl[res.url] = res; });
+                }
+                items.forEach(item => {
+                    const d = byUrl[item.url];
+                    if (!d || d.error) return;
+                    item.status = d.streams?.length ? 'online' : 'offline';
+                    if (d.avatar) item.avatar = d.avatar;
+                });
+            } catch (e) {
+                for (let i = 0; i < items.length; i += 3) {
+                    await Promise.all(items.slice(i, i+3).map(async item => {
+                        try {
+                            let ck = '';
+                            if(item.url.includes('sooplive.com')) ck = getSoopCookie();
+                            else if(item.url.includes('twitch.tv')) ck = getTwitchCookie();
+                            const r = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(item.url)}` + (ck ? `&cookie=${encodeURIComponent(ck)}` : ''));
+                            if (r.status === 400) { item.status = 'offline'; return; }
+                            const d = await r.json();
+                            if (d.error) return;
+                            item.status = d.streams?.length ? 'online' : 'offline';
+                            if (d.avatar) item.avatar = d.avatar;
+                        } catch(e) {}
+                    }));
+                }
+            }
+
+            _saveFollows(items); renderFollowList();
+            items.forEach(item => { if (before[item.url] !== 'online' && item.status === 'online' && _shouldToast(item.url)) showPageToast(item.platform, item.name, item.avatar, item.url); });
+        } finally {
+            _followRefreshing = false;
+        }
     }
 
     // ==================== 弹幕连接模块 ====================
@@ -533,7 +532,6 @@
         const v = r.readBytes(1); if(!v||!v.length) return;
         const r2 = tarsReader(v); r2.readInt(0);
         const msgType = r2.readInt(1);
-        // 1400=普通弹幕, 1401=贵族/VIP弹幕, 1402=高亮/颜色弹幕（结构相同，统一处理）
         if(msgType!==1400 && msgType!==1401 && msgType!==1402) return;
         const m = r2.readBytes(2); let nick = r2.readString(4)||'虎牙网友';
         if(!m||!m.length) return;
@@ -584,7 +582,8 @@
         const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName);
         twitchWs=ws;
         ws.onopen = () => { twitchConnecting=false; addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); };
-        ws.onmessage = e => { if(typeof e.data==='string'&&e.data.includes('pong')) return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
+        // 【F-11修复】Twitch pong 严格比较
+        ws.onmessage = e => { if(typeof e.data==='string' && e.data === 'pong') return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
         ws.onerror = () => { twitchConnecting=false; };
         ws.onclose = () => { twitchConnecting=false; clearInterval(ws._hb); if(twitchWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('twitch.tv')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startTwitchDanmaku(channelName); },3000); };
     }
@@ -620,100 +619,100 @@
     let _lastReconnectAt = 0;
     const RECONNECT_COOLDOWN_MS = 6000;
 
-    // 自动重连专用入口：stall/ended/error/hls 等所有"自动触发"的重连都应走这里。
-    // 用户主动点击播放（goWithUrl 直接调用）不受此限制。
     function guardedReconnect(url, delayMs) {
         if(!url) return;
         const now = Date.now();
-        if(now - _lastReconnectAt < RECONNECT_COOLDOWN_MS) return; // 冷却中，丢弃本次自动重连
+        if(now - _lastReconnectAt < RECONNECT_COOLDOWN_MS) return;
         _lastReconnectAt = now;
         setTimeout(() => { if(lastRoomUrl) goWithUrl(url); }, delayMs || 0);
     }
 
+    // 【修复】并发锁改用 try/finally，避免固定定时器导致锁提前释放
     async function goWithUrl(raw, retryCount) {
         retryCount = retryCount || 0;
         if(!raw || window._reParseLock) return;
-        window._reParseLock = true; setTimeout(()=>{ window._reParseLock=false; },2000);
-        setBtn(true);
-        if(chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
+        window._reParseLock = true;
+        try {
+            setBtn(true);
+            if(chatMessagesDiv) chatMessagesDiv.innerHTML = '<div class="empty-chat">💬 弹幕消息会出现在这里 ~</div>';
 
-        // 取消上一次尚未完成的解析请求，避免快速切台时旧响应覆盖新状态
-        if(_currentFetchAbort){ try{ _currentFetchAbort.abort(); }catch(e){} }
-        const abortCtrl = new AbortController();
-        _currentFetchAbort = abortCtrl;
+            if(_currentFetchAbort){ try{ _currentFetchAbort.abort(); }catch(e){} }
+            const abortCtrl = new AbortController();
+            _currentFetchAbort = abortCtrl;
 
-        const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
-        lastRoomUrl = isCDN ? '' : raw;
-        currentPlatform = getPlatformName(raw);
-        let streams = null;
+            // 【F-17修复】直链也保留 lastRoomUrl，以便自动重连
+            const isCDN = /\.flv[?#]|\.flv$|\.m3u8[?#]|\.m3u8$/.test(raw) || /flv\.huya\.com|hls\.huya\.com|bilivideo\.com|douyucdn\.cn/.test(raw);
+            lastRoomUrl = raw;   // 无条件保存
+            currentPlatform = getPlatformName(raw);
+            let streams = null;
 
-        if(!isCDN && (raw.includes('huya.com')||raw.includes('douyu.com')||raw.includes('bilibili.com')||raw.includes('douyin.com')||raw.includes('twitch.tv')||raw.includes('pandalive.co.kr')||raw.includes('sooplive.com'))){
-            try{
-                let ck = '';
-                if(raw.includes('sooplive.com')) ck = getSoopCookie();
-                else if(raw.includes('twitch.tv')) ck = getTwitchCookie();
-                const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`+(ck?`&cookie=${encodeURIComponent(ck)}`:''), { signal: abortCtrl.signal });
-                if(_currentFetchAbort !== abortCtrl) return; // 已被更新的请求取代，丢弃本次结果
-                if(resp.status === 429) throw new Error('请求过于频繁，请稍后再试');
-                if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const data = await resp.json();
-                if(_currentFetchAbort !== abortCtrl) return;
-                if(data.error){
-                    // SOOP 19+ 限制：不显示"未开播"蒙层，引导用户去设置页填 Cookie
-                    if(raw.includes('sooplive.com') && (data.error.includes('19+') || data.error.includes('Cookie'))){
-                        currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
-                        if(confirm(`${data.error}\n\n是否现在前往设置页填写 SOOP Cookie？`)){
-                            switchTab('settings');
+            if(!isCDN && (raw.includes('huya.com')||raw.includes('douyu.com')||raw.includes('bilibili.com')||raw.includes('douyin.com')||raw.includes('twitch.tv')||raw.includes('pandalive.co.kr')||raw.includes('sooplive.com'))){
+                try{
+                    let ck = '';
+                    if(raw.includes('sooplive.com')) ck = getSoopCookie();
+                    else if(raw.includes('twitch.tv')) ck = getTwitchCookie();
+                    const resp = await fetch(`${API_BASE}/api/parse?url=${encodeURIComponent(raw)}`+(ck?`&cookie=${encodeURIComponent(ck)}`:''), { signal: abortCtrl.signal });
+                    if(_currentFetchAbort !== abortCtrl) return;
+                    if(resp.status === 429) throw new Error('请求过于频繁，请稍后再试');
+                    if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const data = await resp.json();
+                    if(_currentFetchAbort !== abortCtrl) return;
+                    if(data.error){
+                        if(raw.includes('sooplive.com') && (data.error.includes('19+') || data.error.includes('Cookie'))){
+                            currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                            if(confirm(`${data.error}\n\n是否现在前往设置页填写 SOOP Cookie？`)){
+                                switchTab('settings');
+                            }
+                            setBtn(false); return;
                         }
+                        throw new Error(data.error);
+                    }
+                    if(data.streams?.length){
+                        streams = data.streams.map(s=>({...s, url:ensureHttps(s.url)}));
+                        currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                        currentAvatar = data.avatar || '';
+                        updateFaviconByPlatform(currentPlatform);
+                        dmConfig = data.danmaku || null;
+                        if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
+                        if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
+                        hideOfflineOverlay();
+                    } else {
+                        currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                        showOfflineOverlay(currentAnchorName);
                         setBtn(false); return;
                     }
-                    throw new Error(data.error);
-                }
-                if(data.streams?.length){
-                    streams = data.streams.map(s=>({...s, url:ensureHttps(s.url)}));
-                    currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
-                    currentAvatar = data.avatar || '';
-                    updateFaviconByPlatform(currentPlatform);
-                    dmConfig = data.danmaku || null;
-                    if(raw.includes('douyin.com') && data.roomId) window._douyinRoomId = data.roomId;
-                    if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
-                    hideOfflineOverlay();
-                } else {
-                    currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                } catch(e){
+                    if(e.name === 'AbortError') return;
+                    if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
+                        if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
+                    }
+                    console.warn(`解析失败：${e.message}`);
+                    currentAnchorName = currentAnchorName || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName);
                     setBtn(false); return;
                 }
-            } catch(e){
-                if(e.name === 'AbortError') return; // 被新请求取代，静默退出
-                if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
-                    if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
-                }
-                console.warn(`解析失败：${e.message}`);
-                currentAnchorName = currentAnchorName || raw.split('/').pop().split('?')[0] || '主播';
-                showOfflineOverlay(currentAnchorName);
-                setBtn(false); return;
-            }
-        } else if(isCDN){
-            const fileName = raw.split('/').pop().split('?')[0] || '直链';
-            streams = [{ cdn:'直链', url:ensureHttps(raw), type: raw.includes('.m3u8')?'m3u8':'flv' }];
-            currentAnchorName = fileName; currentAvatar=''; currentPlatform='直链'; dmConfig=null; updateFaviconByPlatform('直链');
-        } else { setBtn(false); return; }
+            } else if(isCDN){
+                const fileName = raw.split('/').pop().split('?')[0] || '直链';
+                streams = [{ cdn:'直链', url:ensureHttps(raw), type: raw.includes('.m3u8')?'m3u8':'flv' }];
+                currentAnchorName = fileName; currentAvatar=''; currentPlatform='直链'; dmConfig=null; updateFaviconByPlatform('直链');
+            } else { setBtn(false); return; }
 
-        updatePageTitle(currentAnchorName, currentPlatform);
-        addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
-        playStream(streams);
-        setBtn(false);
+            updatePageTitle(currentAnchorName, currentPlatform);
+            addToHistory(raw, currentAnchorName, currentPlatform, currentAvatar);
+            playStream(streams);
+            setBtn(false);
+        } finally {
+            window._reParseLock = false;
+        }
     }
 
     function playStream(streams) {
-        // 1. 先拿旧 video 引用，在 Artplayer 销毁（会移除/替换 <video>）之前清理底层播放器实例与定时器，
-        //    避免旧实例的回调在分离的 DOM 节点上继续触发，误判卡顿并对新地址反复重连。
         const oldVideo = document.querySelector('#player video');
         if(oldVideo){
             if(oldVideo._stallTimer){ clearInterval(oldVideo._stallTimer); oldVideo._stallTimer=null; }
             if(oldVideo._hlsStallTimer){ clearInterval(oldVideo._hlsStallTimer); oldVideo._hlsStallTimer=null; }
             if(oldVideo._adWaitTimer){ clearTimeout(oldVideo._adWaitTimer); oldVideo._adWaitTimer=null; }
-            oldVideo._playerId = -1; oldVideo._hlsId = -1; // 使旧回调里的 id 比对必然失败
+            oldVideo._playerId = -1; oldVideo._hlsId = -1;
             if(oldVideo._mpegts){
                 const _old=oldVideo._mpegts; oldVideo._mpegts=null;
                 try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){}
@@ -721,7 +720,6 @@
         }
         if(window._hlsInst){ try{ window._hlsInst.stopLoad(); window._hlsInst.detachMedia(); window._hlsInst.destroy(); } catch(e){} window._hlsInst=null; }
 
-        // 2. 现在再安全销毁 Artplayer
         if(art){
             try{
                 if(art.video){ art.video.pause(); if(art.video.srcObject) art.video.srcObject=null; art.video.removeAttribute('src'); }
@@ -763,7 +761,7 @@
                         try{ _old.pause(); _old.unload(); _old.detachMediaElement(); _old.destroy(); } catch(e){}
                     }
                     video._playerIdCounter = (video._playerIdCounter||0)+1;
-                    const playerId = video._playerIdCounter;   // 【修复 playerId 未定义】
+                    const playerId = video._playerIdCounter;
                     video._playerId = playerId;
 
                     const player = mpegts.createPlayer({ type:'flv', url:url, isLive:true }, {
@@ -777,7 +775,6 @@
                     let lastTime=-1, stallCount=0;
                     video._stallTimer = setInterval(() => {
                         if(video._playerId!==playerId||!art||!video){ clearInterval(video._stallTimer); video._stallTimer=null; return; }
-                        // 后台标签页的计时器会被浏览器节流/批量触发，currentTime 短时间不变属正常现象，不计入卡顿
                         if(document.hidden || video.readyState < 2){ lastTime = video.currentTime; stallCount = 0; return; }
                         const ct = video.currentTime;
                         if(ct===lastTime && !video.paused && !video.ended){
@@ -867,7 +864,13 @@
             else if(lastRoomUrl?.includes('twitch.tv')) startTwitchDanmaku(window._twitchChannelName || lastRoomUrl.split('/').pop().split('?')[0]);
         });
         art.on('video:volumechange', ()=>{ if(art){ savedVolume=art.volume; savedMuted=art.muted; saveVolumeMemory(); } });
-        art.on('quality', (q)=>{ if(q && art.video?._hlsStallTimer){ clearInterval(art.video._hlsStallTimer); art.video._hlsStallTimer=null; } });
+        // 【修复】画质切换时同时清理 flv 的 stallTimer
+        art.on('quality', (q)=>{
+            if(art?.video){
+                if(art.video._stallTimer){ clearInterval(art.video._stallTimer); art.video._stallTimer=null; }
+                if(art.video._hlsStallTimer){ clearInterval(art.video._hlsStallTimer); art.video._hlsStallTimer=null; }
+            }
+        });
     }
 
     document.addEventListener('visibilitychange', () => {
@@ -891,7 +894,7 @@
         if(tab==='danmaku'){ headerTitle.innerText='弹幕列表'; dmSwitch.style.display='flex'; headerAction.style.display='none'; chatMessagesDiv.style.display=danmakuEnabled?'flex':'none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='none'; }
         else if(tab==='follow'){ headerTitle.innerText='关注列表'; dmSwitch.style.display='none'; headerAction.style.display='block'; headerAction.innerText='刷新'; headerAction.onclick=refreshAllFollowStatus; chatMessagesDiv.style.display='none'; followListDiv.style.display='flex'; historyListDiv.style.display='none'; sp.style.display='none'; renderFollowList(); }
         else if(tab==='history'){ headerTitle.innerText='播放历史'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='flex'; sp.style.display='none'; renderHistoryList(); }
-        else if(tab==='settings'){ headerTitle.innerText='设置'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='flex'; document.getElementById('soop-cookie-input').value=getSoopCookie(); document.getElementById('twitch-cookie-input').value=getTwitchCookie(); document.getElementById('soop-cookie-status').textContent=getSoopCookie()?`✅ 已保存 (${getSoopCookie().length} 字符)`:''; document.getElementById('twitch-cookie-status').textContent=getTwitchCookie()?`✅ 已保存 (${getTwitchCookie().length} 字符)`:''; }
+        else if(tab==='settings'){ headerTitle.innerText='设置'; dmSwitch.style.display='none'; headerAction.style.display='none'; chatMessagesDiv.style.display='none'; followListDiv.style.display='none'; historyListDiv.style.display='none'; sp.style.display='flex'; document.getElementById('soop-cookie-input').value=getSoopCookie(); document.getElementById('twitch-cookie-input').value=getTwitchCookie(); document.getElementById('soop-cookie-status').textContent=getSoopCookie()?`✅ 已保存 (${getSoopCookie().length} 字符)`:' '; document.getElementById('twitch-cookie-status').textContent=getTwitchCookie()?`✅ 已保存 (${getTwitchCookie().length} 字符)`:' '; }
     }
 
     function initTabs() {
@@ -914,8 +917,11 @@
     window.toggleFollow = () => {
         const url = document.getElementById('url').value.trim() || lastRoomUrl; if(!url) return;
         const follows = _loadFollows(); const idx = follows.findIndex(x=>x.url===url);
-        if(idx>=0) follows.splice(idx,1);
-        else {
+        if(idx>=0) {
+            follows.splice(idx,1);
+            // 【F-15修复】取关时清理头像缓存
+            localStorage.removeItem(_avKey(url));
+        } else {
             let name=currentAnchorName, platform=currentPlatform, avatar=currentAvatar;
             if(!name||['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链'].includes(name)){
                 const defName = url.split('/').pop().split('?')[0]||'主播';
@@ -938,7 +944,15 @@
         followListDiv.addEventListener('click', e => {
             if(e.button!==0) return;
             const del = e.target.closest('[data-del]');
-            if(del){ const arr=_loadFollows(); arr.splice(parseInt(del.dataset.del),1); _saveFollows(arr); renderFollowList(); updateFollowBtn(lastRoomUrl); return; }
+            if(del){
+                const arr=_loadFollows();
+                const idx = parseInt(del.dataset.del);
+                const url = arr[idx]?.url;
+                arr.splice(idx,1); _saveFollows(arr);
+                // 【F-15修复】列表删除时也清理头像缓存
+                if(url) localStorage.removeItem(_avKey(url));
+                renderFollowList(); updateFollowBtn(lastRoomUrl); return;
+            }
             const it = e.target.closest('.follow-item'); if(it?.dataset.url) playFromFollows(it.dataset.url);
         });
         followListDiv.addEventListener('mousedown', e => { if(e.button===1) e.preventDefault(); });
