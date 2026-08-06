@@ -7,8 +7,8 @@
     <title>聚合直播 - 全平台版</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='40' fill='%23333'/%3E%3Ctext x='50' y='55' text-anchor='middle' fill='%23666' font-size='40'%3E📺%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="https://registry.npmmirror.com/artplayer/5/files/dist/artplayer.css">
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.6/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #0d0d0d; color: #ccc; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 13px; line-height: 1.5; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
@@ -345,7 +345,7 @@
     function updatePageTitle(anchorName, platform) {
         const defaultNames = ['主播','虎牙主播','斗鱼主播','B站主播','抖音主播','直链','未知'];
         if (defaultNames.includes(anchorName) && platform === '虎牙' && lastRoomUrl) anchorName = `房间 ${lastRoomUrl.split('/').pop().split('?')[0]}`;
-        document.title = anchorName && !defaultNames.includes(anchorName) && platform && platform !== '未知' ? `${platform} ${anchorName}` : platform || anchorName || '聚合直播';
+        document.title = anchorName || '聚合直播';
     }
 
     function getPlatformName(url) {
@@ -555,6 +555,7 @@
 
             // 【修复2】只过滤空正文，不因昵称或其他字段问题丢弃
             if(!txt || !txt.trim()) return;
+            if(nick === '系统消息') return;
 
             // 【修复4】调试日志，方便排查漏弹幕
             console.debug('[虎牙弹幕]', { cmd, nick, txt });
@@ -601,9 +602,12 @@
     }
 
     function startHuyaDanmaku(config) {
-        if(!config||!config.ayyuid||huyaConnecting) return;
+        if(!config||!(config.uid||config.ayyuid)||huyaConnecting) return;
         huyaConnecting = true;
-        const {ayyuid, topSid, subSid} = config;
+        // 【SlotSun修复】用 uid（来自PC端API）替代 ayyuid（来自移动版页面 lYyid）
+        const uid = config.uid || config.ayyuid || 0;
+        const topSid = config.topSid || 0;
+        const subSid = config.subSid || 0;
         const tO = () => { const b=[]; const wH=(t,y)=>{ if(t<15) b.push((t<<4)|y); else{ b.push(0xF0|y); b.push(t); } };
             const w8=(t,v)=>{ if(v===0) wH(t,12); else{ wH(t,0); b.push(v&0xFF); } };
             const w16=(t,v)=>{ if(v>=-128&&v<=127) w8(t,v); else{ wH(t,1); b.push((v>>8)&0xFF,v&0xFF); } };
@@ -613,9 +617,23 @@
             const wS=(t,s)=>{ const e=new TextEncoder().encode(s); if(e.length<=255){ wH(t,6); b.push(e.length); }else{ const l=e.length; wH(t,7); b.push((l>>24)&0xFF,(l>>16)&0xFF,(l>>8)&0xFF,l&0xFF); } for(let i=0;i<e.length;i++) b.push(e[i]); };
             const wBy=(t,i)=>{ wH(t,13); wH(0,0); w32(0,i.length); for(let j=0;j<i.length;j++) b.push(i[j]); };
             return { wInt64:w64, wBool:wB, wStr:wS, wBytes:wBy, get:()=>b }; };
-        const reg = () => { const o=tO(); o.wInt64(0,ayyuid); o.wBool(1,ayyuid===0); o.wStr(2,'web_'+Date.now()); o.wStr(3,''); o.wInt64(4,topSid); o.wInt64(5,subSid); o.wInt64(6,ayyuid); o.wInt64(7,3);
+        // 【SlotSun修复】注册包：tag0=uid, tag1=false, tag4=0, tag5=0, tag6=uid, tag7=3
+        // 原来 tag4=topSid/tag5=subSid 导致小直播间订阅到空频道
+        const reg = () => { const o=tO(); o.wInt64(0,uid); o.wBool(1,false); o.wStr(2,'web_'+Date.now()); o.wStr(3,''); o.wInt64(4,0); o.wInt64(5,0); o.wInt64(6,uid); o.wInt64(7,3);
             const c=tO(); c.wInt64(0,1); c.wBytes(1,o.get()); return new Uint8Array(c.get()).buffer; };
-        const HB = Uint8Array.from(atob('ABQdAAwsNgBM'), c=>c.charCodeAt(0));
+        // 【SlotSun修复】心跳包换成完整版本
+        const HB = new Uint8Array([
+            0x00,0x03,0x1d,0x00,0x00,0x69,0x00,0x00,0x00,0x69,0x10,0x03,
+            0x2c,0x3c,0x4c,0x56,0x08,0x6f,0x6e,0x6c,0x69,0x6e,0x65,0x75,
+            0x69,0x66,0x0f,0x4f,0x6e,0x55,0x73,0x65,0x72,0x48,0x65,0x61,
+            0x72,0x74,0x42,0x65,0x61,0x74,0x7d,0x00,0x00,0x3c,0x08,0x00,
+            0x01,0x06,0x04,0x74,0x52,0x65,0x71,0x1d,0x00,0x00,0x2f,0x0a,
+            0x0a,0x0c,0x16,0x00,0x26,0x00,0x36,0x07,0x61,0x64,0x72,0x5f,
+            0x77,0x61,0x70,0x46,0x00,0x0b,0x12,0x03,0xae,0xf0,0x0f,0x22,
+            0x03,0xae,0xf0,0x0f,0x3c,0x42,0x6d,0x52,0x02,0x60,0x5c,0x60,
+            0x01,0x7c,0x82,0x00,0x0b,0xb0,0x1f,0x9c,0xac,0x0b,0x8c,0x98,
+            0x0c,0xa8,0x0c,0x20,
+        ]);
         const ws = new WebSocket('wss://cdnws.api.huya.com'); ws.binaryType='arraybuffer'; dmWs=ws;
         ws.onopen = () => { huyaConnecting=false; ws.send(reg()); ws._hb=setInterval(()=>{ if(ws.readyState===1) ws.send(HB); },60000); };
         ws.onmessage = e => { try{ parseHuyaMsg(new Uint8Array(e.data)); } catch(err){} };
