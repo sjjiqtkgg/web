@@ -498,19 +498,66 @@
     }
 
     // ==================== 弹幕连接模块 ====================
-    function startDouyuDanmaku(roomId) {
-        if (!danmakuEnabled || !roomId || douyuConnecting) return;
-        douyuConnecting = true;
-        if (dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-        const enc = (p) => { const b = new TextEncoder().encode(p); const a = new ArrayBuffer(b.length+13); const v = new DataView(a); v.setUint32(0,b.length+9,true); v.setUint32(4,b.length+9,true); v.setUint16(8,689,true); v.setUint8(10,0); v.setUint8(11,0); new Uint8Array(a,12).set(b); v.setUint8(12+b.length,0); return a; };
-        const parse = (s) => { const r={}; s.split('/').forEach(p=>{ const i=p.indexOf('@='); if(i>=0) r[p.slice(0,i)]=p.slice(i+2).replace(/@S/g,'/').replace(/@A/g,'@'); }); return r; };
-        const ws = new WebSocket('wss://danmuproxy.douyu.com:8506/');
-        ws.binaryType = 'arraybuffer'; dmWs = ws;
-        ws.onopen = () => { douyuConnecting = false; ws.send(enc(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`)); ws.send(enc(`type@=joingroup/rid@=${roomId}/gid@=-9999/`)); ws._hb = setInterval(()=>{ if(ws.readyState===1) ws.send(enc('type@=mrkl/')); }, 45000); };
-        ws.onmessage = e => { const d = new Uint8Array(e.data); let o=0; while(o+13<=d.length){ const v=new DataView(d.buffer,d.byteOffset+o); const l=v.getUint32(0,true); if(l<9||o+4+l>d.length) break; const body=new TextDecoder().decode(d.slice(o+12,o+4+l-1)); const m=parse(body); if(m.type==='chatmsg'&&m.txt) addChatMessage(m.nn||'匿名用户',m.txt.replace(/@S/g,'/').replace(/@A/g,'@')); o+=4+l; } };
-        ws.onclose = () => { douyuConnecting=false; clearInterval(ws._hb); if(dmWs===ws&&danmakuEnabled) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startDouyuDanmaku(roomId); },3000); };
-        ws.onerror = () => { douyuConnecting=false; clearInterval(ws._hb); };
+    // 通用弹幕连接器：四个平台（斗鱼/虎牙/抖音/Twitch）的连接、心跳、断线重连骨架高度一致，
+    // 抽成一个工厂函数复用。各平台的协议构造/消息解析仍各自实现，通过参数传入；
+    // 原代码里几处平台间细微的不一致（错误时是否清心跳、重连是否额外校验当前平台）
+    // 通过 clearHeartbeatOnError / reconnectGuard 显式保留，不做"顺手统一"。
+    function createDanmakuConnector({
+        getWs, setWs,                       // 读取/写入底层 ws 引用（斗鱼与虎牙共用 dmWs，与原代码一致）
+        isConnecting, setConnectingFlag,
+        validate,                            // 除 truthy 外的额外校验（虎牙需要 uid/ayyuid）
+        buildSocket,                          // (arg) => WebSocket，已设置好 binaryType 等
+        onOpen,                                // (ws, arg) => void，发送注册包/心跳等初始化逻辑
+        onMessage,                              // (event) => void
+        clearHeartbeatOnError = true,            // 斗鱼/虎牙原本在 onerror 里会清心跳，抖音/Twitch 不会
+        reconnectGuard = () => true,              // 抖音/Twitch 额外要求 lastRoomUrl 仍是本平台才重连
+    }) {
+        return function start(arg) {
+            if (!danmakuEnabled || !arg || (validate && !validate(arg)) || isConnecting()) return;
+            setConnectingFlag(true);
+            const existing = getWs();
+            if (existing) { clearInterval(existing._hb); try { existing.close(); } catch(e){} setWs(null); }
+            const ws = buildSocket(arg);
+            setWs(ws);
+            ws.onopen = () => { setConnectingFlag(false); onOpen(ws, arg); };
+            ws.onmessage = onMessage;
+            ws.onerror = () => { setConnectingFlag(false); if (clearHeartbeatOnError) clearInterval(ws._hb); };
+            ws.onclose = () => {
+                setConnectingFlag(false); clearInterval(ws._hb);
+                if (getWs() === ws && danmakuEnabled && reconnectGuard()) {
+                    setTimeout(() => { if (currentDanmakuRoom === lastRoomUrl) start(arg); }, 3000);
+                }
+            };
+            return ws;
+        };
     }
+
+    // ---- 斗鱼：弹幕二进制帧编解码 ----
+    function douyuEncode(p) { const b = new TextEncoder().encode(p); const a = new ArrayBuffer(b.length+13); const v = new DataView(a); v.setUint32(0,b.length+9,true); v.setUint32(4,b.length+9,true); v.setUint16(8,689,true); v.setUint8(10,0); v.setUint8(11,0); new Uint8Array(a,12).set(b); v.setUint8(12+b.length,0); return a; }
+    function douyuParseFrame(s) { const r={}; s.split('/').forEach(p=>{ const i=p.indexOf('@='); if(i>=0) r[p.slice(0,i)]=p.slice(i+2).replace(/@S/g,'/').replace(/@A/g,'@'); }); return r; }
+
+    const startDouyuDanmaku = createDanmakuConnector({
+        getWs: () => dmWs, setWs: v => { dmWs = v; },
+        isConnecting: () => douyuConnecting, setConnectingFlag: v => { douyuConnecting = v; },
+        buildSocket: () => { const ws = new WebSocket('wss://danmuproxy.douyu.com:8506/'); ws.binaryType = 'arraybuffer'; return ws; },
+        onOpen: (ws, roomId) => {
+            ws.send(douyuEncode(`type@=loginreq/roomid@=${roomId}/ver@=20190610/aver@=218101901/ct@=0/`));
+            ws.send(douyuEncode(`type@=joingroup/rid@=${roomId}/gid@=-9999/`));
+            ws._hb = setInterval(()=>{ if(ws.readyState===1) ws.send(douyuEncode('type@=mrkl/')); }, 45000);
+        },
+        onMessage: e => {
+            const d = new Uint8Array(e.data); let o=0;
+            while(o+13<=d.length){
+                const v=new DataView(d.buffer,d.byteOffset+o);
+                const l=v.getUint32(0,true);
+                if(l<9||o+4+l>d.length) break;
+                const body=new TextDecoder().decode(d.slice(o+12,o+4+l-1));
+                const m=douyuParseFrame(body);
+                if(m.type==='chatmsg'&&m.txt) addChatMessage(m.nn||'匿名用户',m.txt.replace(/@S/g,'/').replace(/@A/g,'@'));
+                o+=4+l;
+            }
+        },
+    });
 
     // 虎牙 Tars 解析
     function tarsReader(ab) {
@@ -601,70 +648,73 @@
         }
     }
 
-    function startHuyaDanmaku(config) {
-        if(!config||!(config.uid||config.ayyuid)||huyaConnecting) return;
-        huyaConnecting = true;
-        // 【SlotSun修复】用 uid（来自PC端API）替代 ayyuid（来自移动版页面 lYyid）
-        const uid = config.uid || config.ayyuid || 0;
-        const topSid = config.topSid || 0;
-        const subSid = config.subSid || 0;
-        const tO = () => { const b=[]; const wH=(t,y)=>{ if(t<15) b.push((t<<4)|y); else{ b.push(0xF0|y); b.push(t); } };
-            const w8=(t,v)=>{ if(v===0) wH(t,12); else{ wH(t,0); b.push(v&0xFF); } };
-            const w16=(t,v)=>{ if(v>=-128&&v<=127) w8(t,v); else{ wH(t,1); b.push((v>>8)&0xFF,v&0xFF); } };
-            const w32=(t,v)=>{ if(v>=-32768&&v<=32767) w16(t,v); else{ wH(t,2); b.push((v>>24)&0xFF,(v>>16)&0xFF,(v>>8)&0xFF,v&0xFF); } };
-            const w64=(t,v)=>{ if(v>=-2147483648&&v<=2147483647) w32(t,v); else{ wH(t,3); const hi=Math.floor(v/0x100000000), lo=v>>>0; b.push((hi>>24)&0xFF,(hi>>16)&0xFF,(hi>>8)&0xFF,hi&0xFF,(lo>>24)&0xFF,(lo>>16)&0xFF,(lo>>8)&0xFF,lo&0xFF); } };
-            const wB=(t,v)=>{ w8(t,v?1:0); };
-            const wS=(t,s)=>{ const e=new TextEncoder().encode(s); if(e.length<=255){ wH(t,6); b.push(e.length); }else{ const l=e.length; wH(t,7); b.push((l>>24)&0xFF,(l>>16)&0xFF,(l>>8)&0xFF,l&0xFF); } for(let i=0;i<e.length;i++) b.push(e[i]); };
-            const wBy=(t,i)=>{ wH(t,13); wH(0,0); w32(0,i.length); for(let j=0;j<i.length;j++) b.push(i[j]); };
-            return { wInt64:w64, wBool:wB, wStr:wS, wBytes:wBy, get:()=>b }; };
-        // 【SlotSun修复】注册包：tag0=uid, tag1=false, tag4=0, tag5=0, tag6=uid, tag7=3
-        // 原来 tag4=topSid/tag5=subSid 导致小直播间订阅到空频道
-        const reg = () => { const o=tO(); o.wInt64(0,uid); o.wBool(1,false); o.wStr(2,'web_'+Date.now()); o.wStr(3,''); o.wInt64(4,0); o.wInt64(5,0); o.wInt64(6,uid); o.wInt64(7,3);
-            const c=tO(); c.wInt64(0,1); c.wBytes(1,o.get()); return new Uint8Array(c.get()).buffer; };
-        // 【SlotSun修复】心跳包换成完整版本
-        const HB = new Uint8Array([
-            0x00,0x03,0x1d,0x00,0x00,0x69,0x00,0x00,0x00,0x69,0x10,0x03,
-            0x2c,0x3c,0x4c,0x56,0x08,0x6f,0x6e,0x6c,0x69,0x6e,0x65,0x75,
-            0x69,0x66,0x0f,0x4f,0x6e,0x55,0x73,0x65,0x72,0x48,0x65,0x61,
-            0x72,0x74,0x42,0x65,0x61,0x74,0x7d,0x00,0x00,0x3c,0x08,0x00,
-            0x01,0x06,0x04,0x74,0x52,0x65,0x71,0x1d,0x00,0x00,0x2f,0x0a,
-            0x0a,0x0c,0x16,0x00,0x26,0x00,0x36,0x07,0x61,0x64,0x72,0x5f,
-            0x77,0x61,0x70,0x46,0x00,0x0b,0x12,0x03,0xae,0xf0,0x0f,0x22,
-            0x03,0xae,0xf0,0x0f,0x3c,0x42,0x6d,0x52,0x02,0x60,0x5c,0x60,
-            0x01,0x7c,0x82,0x00,0x0b,0xb0,0x1f,0x9c,0xac,0x0b,0x8c,0x98,
-            0x0c,0xa8,0x0c,0x20,
-        ]);
-        const ws = new WebSocket('wss://cdnws.api.huya.com'); ws.binaryType='arraybuffer'; dmWs=ws;
-        ws.onopen = () => { huyaConnecting=false; ws.send(reg()); ws._hb=setInterval(()=>{ if(ws.readyState===1) ws.send(HB); },60000); };
-        ws.onmessage = e => { try{ parseHuyaMsg(new Uint8Array(e.data)); } catch(err){} };
-        ws.onclose = () => { huyaConnecting=false; clearInterval(ws._hb); if(dmWs===ws&&danmakuEnabled) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startHuyaDanmaku(config); },3000); };
-        ws.onerror = () => { huyaConnecting=false; clearInterval(ws._hb); };
+    // ---- 虎牙：Tars 二进制协议构造 ----
+    function tarsWriter() {
+        const b=[]; const wH=(t,y)=>{ if(t<15) b.push((t<<4)|y); else{ b.push(0xF0|y); b.push(t); } };
+        const w8=(t,v)=>{ if(v===0) wH(t,12); else{ wH(t,0); b.push(v&0xFF); } };
+        const w16=(t,v)=>{ if(v>=-128&&v<=127) w8(t,v); else{ wH(t,1); b.push((v>>8)&0xFF,v&0xFF); } };
+        const w32=(t,v)=>{ if(v>=-32768&&v<=32767) w16(t,v); else{ wH(t,2); b.push((v>>24)&0xFF,(v>>16)&0xFF,(v>>8)&0xFF,v&0xFF); } };
+        const w64=(t,v)=>{ if(v>=-2147483648&&v<=2147483647) w32(t,v); else{ wH(t,3); const hi=Math.floor(v/0x100000000), lo=v>>>0; b.push((hi>>24)&0xFF,(hi>>16)&0xFF,(hi>>8)&0xFF,hi&0xFF,(lo>>24)&0xFF,(lo>>16)&0xFF,(lo>>8)&0xFF,lo&0xFF); } };
+        const wB=(t,v)=>{ w8(t,v?1:0); };
+        const wS=(t,s)=>{ const e=new TextEncoder().encode(s); if(e.length<=255){ wH(t,6); b.push(e.length); }else{ const l=e.length; wH(t,7); b.push((l>>24)&0xFF,(l>>16)&0xFF,(l>>8)&0xFF,l&0xFF); } for(let i=0;i<e.length;i++) b.push(e[i]); };
+        const wBy=(t,i)=>{ wH(t,13); wH(0,0); w32(0,i.length); for(let j=0;j<i.length;j++) b.push(i[j]); };
+        return { wInt64:w64, wBool:wB, wStr:wS, wBytes:wBy, get:()=>b };
     }
 
-    function startDouyinDanmaku(roomId) {
-        if(!danmakuEnabled||!roomId||douyinConnecting) return;
-        douyinConnecting = true;
-        if(douyinWs){ clearInterval(douyinWs._hb); try{douyinWs.close();}catch(e){} douyinWs=null; }
-        const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/douyin/'+roomId);
-        douyinWs=ws;
-        ws.onopen = () => { douyinConnecting=false; addChatMessage('系统','弹幕连接成功！'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },15000); };
-        ws.onmessage = e => { if(e.data==='pong') return; try{ const m=JSON.parse(e.data); if(m.method==='WebcastChatMessage'&&m.chatBy!=='9') addChatMessage((m.user?.nickname)||'匿名用户', m.content||''); } catch(err){} };
-        ws.onclose = () => { douyinConnecting=false; clearInterval(ws._hb); if(douyinWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('douyin.com')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startDouyinDanmaku(roomId); },3000); };
-        ws.onerror = () => { douyinConnecting=false; };
-    }
+    // 【SlotSun修复】心跳包固定字节内容（完整版本，替代原来的简化包）
+    const HUYA_HEARTBEAT_BYTES = new Uint8Array([
+        0x00,0x03,0x1d,0x00,0x00,0x69,0x00,0x00,0x00,0x69,0x10,0x03,
+        0x2c,0x3c,0x4c,0x56,0x08,0x6f,0x6e,0x6c,0x69,0x6e,0x65,0x75,
+        0x69,0x66,0x0f,0x4f,0x6e,0x55,0x73,0x65,0x72,0x48,0x65,0x61,
+        0x72,0x74,0x42,0x65,0x61,0x74,0x7d,0x00,0x00,0x3c,0x08,0x00,
+        0x01,0x06,0x04,0x74,0x52,0x65,0x71,0x1d,0x00,0x00,0x2f,0x0a,
+        0x0a,0x0c,0x16,0x00,0x26,0x00,0x36,0x07,0x61,0x64,0x72,0x5f,
+        0x77,0x61,0x70,0x46,0x00,0x0b,0x12,0x03,0xae,0xf0,0x0f,0x22,
+        0x03,0xae,0xf0,0x0f,0x3c,0x42,0x6d,0x52,0x02,0x60,0x5c,0x60,
+        0x01,0x7c,0x82,0x00,0x0b,0xb0,0x1f,0x9c,0xac,0x0b,0x8c,0x98,
+        0x0c,0xa8,0x0c,0x20,
+    ]);
 
-    function startTwitchDanmaku(channelName) {
-        if(!danmakuEnabled||!channelName||twitchConnecting) return;
-        twitchConnecting = true;
-        if(twitchWs){ try{twitchWs.close();}catch(e){} twitchWs=null; }
-        const ws = new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName);
-        twitchWs=ws;
-        ws.onopen = () => { twitchConnecting=false; addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); };
+    const startHuyaDanmaku = createDanmakuConnector({
+        getWs: () => dmWs, setWs: v => { dmWs = v; },
+        isConnecting: () => huyaConnecting, setConnectingFlag: v => { huyaConnecting = v; },
+        validate: config => !!(config.uid || config.ayyuid),
+        buildSocket: () => { const ws = new WebSocket('wss://cdnws.api.huya.com'); ws.binaryType = 'arraybuffer'; return ws; },
+        onOpen: (ws, config) => {
+            // 【SlotSun修复】用 uid（来自PC端API）替代 ayyuid（来自移动版页面 lYyid）
+            const uid = config.uid || config.ayyuid || 0;
+            // 【SlotSun修复】注册包：tag0=uid, tag1=false, tag4=0, tag5=0, tag6=uid, tag7=3
+            // 原来 tag4=topSid/tag5=subSid 导致小直播间订阅到空频道
+            const o = tarsWriter();
+            o.wInt64(0,uid); o.wBool(1,false); o.wStr(2,'web_'+Date.now()); o.wStr(3,''); o.wInt64(4,0); o.wInt64(5,0); o.wInt64(6,uid); o.wInt64(7,3);
+            const c = tarsWriter();
+            c.wInt64(0,1); c.wBytes(1,o.get());
+            ws.send(new Uint8Array(c.get()).buffer);
+            ws._hb = setInterval(()=>{ if(ws.readyState===1) ws.send(HUYA_HEARTBEAT_BYTES); },60000);
+        },
+        onMessage: e => { try{ parseHuyaMsg(new Uint8Array(e.data)); } catch(err){} },
+    });
+
+    const startDouyinDanmaku = createDanmakuConnector({
+        getWs: () => douyinWs, setWs: v => { douyinWs = v; },
+        isConnecting: () => douyinConnecting, setConnectingFlag: v => { douyinConnecting = v; },
+        buildSocket: roomId => new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/douyin/'+roomId),
+        onOpen: ws => { addChatMessage('系统','弹幕连接成功！'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },15000); },
+        onMessage: e => { if(e.data==='pong') return; try{ const m=JSON.parse(e.data); if(m.method==='WebcastChatMessage'&&m.chatBy!=='9') addChatMessage((m.user?.nickname)||'匿名用户', m.content||''); } catch(err){} },
+        clearHeartbeatOnError: false,
+        reconnectGuard: () => lastRoomUrl?.includes('douyin.com'),
+    });
+
+    const startTwitchDanmaku = createDanmakuConnector({
+        getWs: () => twitchWs, setWs: v => { twitchWs = v; },
+        isConnecting: () => twitchConnecting, setConnectingFlag: v => { twitchConnecting = v; },
+        buildSocket: channelName => new WebSocket(API_BASE.replace(/^http/,'ws')+'/ws/twitch/'+channelName),
+        onOpen: ws => { addChatMessage('系统','✔ Twitch 弹幕已连线'); ws._hb=setInterval(()=>{ if(ws.readyState===WebSocket.OPEN) ws.send('ping'); else clearInterval(ws._hb); },30000); },
         // 【F-11修复】Twitch pong 严格比较
-        ws.onmessage = e => { if(typeof e.data==='string' && e.data === 'pong') return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} };
-        ws.onerror = () => { twitchConnecting=false; };
-        ws.onclose = () => { twitchConnecting=false; clearInterval(ws._hb); if(twitchWs===ws&&danmakuEnabled&&lastRoomUrl?.includes('twitch.tv')) setTimeout(()=>{ if(currentDanmakuRoom===lastRoomUrl) startTwitchDanmaku(channelName); },3000); };
-    }
+        onMessage: e => { if(typeof e.data==='string' && e.data === 'pong') return; try{ const m=JSON.parse(e.data); if(m.nick&&m.content) addChatMessage(m.nick,m.content); } catch(err){} },
+        clearHeartbeatOnError: false,
+        reconnectGuard: () => lastRoomUrl?.includes('twitch.tv'),
+    });
 
     function addChatMessage(nick, text) {
         if(!danmakuEnabled||currentTab!=='danmaku'||!text?.trim()||!chatMessagesDiv) return;
