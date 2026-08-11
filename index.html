@@ -603,6 +603,7 @@
             // 【修复2】只过滤空正文，不因昵称或其他字段问题丢弃
             if(!txt || !txt.trim()) return;
             if(nick === '系统消息') return;
+            if(nick === '开始摸鱼') return;
 
             // 【修复4】调试日志，方便排查漏弹幕
             console.debug('[虎牙弹幕]', { cmd, nick, txt });
