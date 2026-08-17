@@ -806,7 +806,17 @@
                         if(raw.includes('twitch.tv') && data.channelName) window._twitchChannelName = data.channelName;
                         hideOfflineOverlay();
                     } else {
-                        currentAnchorName = data.title || raw.split('/').pop().split('?')[0] || '主播';
+                        // ========== 未开播分支（已修改） ==========
+                        // 优先使用后端返回的主播名
+                        let name = data.title || '';
+                        // 如果为空或看起来像房间号（纯数字），从关注/历史中查找
+                        if (!name || /^\d+$/.test(name)) {
+                            const follows = _loadFollows();
+                            const found = follows.find(f => f.url === raw);
+                            if (found && found.name) name = found.name;
+                        }
+                        if (!name) name = raw.split('/').pop().split('?')[0] || '主播';
+                        currentAnchorName = name;
                         showOfflineOverlay(currentAnchorName);
                         setBtn(false); return;
                     }
@@ -815,8 +825,15 @@
                     if(e.message.includes('Failed to fetch')||e.message.includes('NetworkError')){
                         if(retryCount < 2){ setBtn(true); setTimeout(()=>goWithUrl(raw, retryCount+1), (retryCount+1)*2000); return; }
                     }
+                    // ========== 解析异常分支（已修改） ==========
                     console.warn(`解析失败：${e.message}`);
-                    currentAnchorName = currentAnchorName || raw.split('/').pop().split('?')[0] || '主播';
+                    let name = currentAnchorName || '';
+                    if (!name || /^\d+$/.test(name)) {
+                        const follows = _loadFollows();
+                        const found = follows.find(f => f.url === raw);
+                        if (found && found.name) name = found.name;
+                    }
+                    currentAnchorName = name || raw.split('/').pop().split('?')[0] || '主播';
                     showOfflineOverlay(currentAnchorName);
                     setBtn(false); return;
                 }
